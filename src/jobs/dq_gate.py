@@ -1,22 +1,15 @@
 # Databricks notebook source
-# Compuerta de calidad: si alguna regla crítica falla, el job se detiene y avisa por correo.
-ESQUEMA = "workspace.applebees"
-MIN_CONCILIADOS = 0.95
+# Una fila válida de métricas es requisito para emitir alertas.
+from quality_rules import qualified_schema, quality_errors
 
-dq = spark.table(f"{ESQUEMA}.gold_calidad_datos").collect()[0].asDict()
-for k, v in dq.items():
-    print(f"{k}: {v}")
-
-errores = []
-if dq["tickets"] == 0:
-    errores.append("no hay tickets en silver_checks")
-if dq["llaves_duplicadas"] > 0:
-    errores.append(f"{dq['llaves_duplicadas']} llaves de ticket duplicadas")
-if dq["pct_tickets_conciliados"] < MIN_CONCILIADOS:
-    errores.append(f"solo {dq['pct_tickets_conciliados']:.2%} de tickets concilian (mínimo {MIN_CONCILIADOS:.0%})")
-if dq["registros_rescatados"] > 0:
-    errores.append(f"{dq['registros_rescatados']} registros con esquema inesperado (_rescued_data)")
-
+dbutils.widgets.text("catalog", "workspace")
+dbutils.widgets.text("schema", "applebees")
+ESQUEMA = qualified_schema(dbutils.widgets.get("catalog"), dbutils.widgets.get("schema"))
+rows = [row.asDict() for row in spark.table(f"{ESQUEMA}.gold_calidad_datos").limit(2).collect()]
+for row in rows:
+    for key, value in row.items():
+        print(f"{key}: {value}")
+errores = quality_errors(rows)
 if errores:
-    raise Exception("Falló la compuerta de calidad: " + "; ".join(errores))
+    raise ValueError("Falló la compuerta de calidad: " + "; ".join(errores))
 print("Calidad OK: el job continúa.")

@@ -4,13 +4,13 @@ resources:
   pipelines:
     applebees_pipeline:
       name: applebees_descuentos_pipeline
-      catalog: workspace
-      schema: applebees
+      catalog: ${var.catalog}
+      schema: ${var.schema}
       serverless: true
       continuous: false          # modo triggered: los datos llegan 1 archivo por día
       channel: CURRENT
       configuration:
-        source_path: /Volumes/workspace/default/applebees
+        source_path: ${var.source_path}
       libraries:
         - glob:
             include: ../../src/transformations/**

@@ -17,7 +17,10 @@ AS SELECT
   SUM(c.tip)                            AS propinas,
   COUNT_IF(c.cien_pct_desc)             AS tickets_100pct_desc,
   COUNT_IF(c.abierto_4h)                AS tickets_abiertos_4h,
-  try_divide(SUM(c.descuento), SUM(c.gross)) AS pct_desc
+  -- Fijar tipos antes y después de dividir: el plan incremental puede ensanchar
+  -- SUM a DECIMAL(38,2) y reducir la escala de la división si queda implícita.
+  CAST(try_divide(CAST(SUM(c.descuento) AS DECIMAL(24,2)),
+                  CAST(SUM(c.gross) AS DECIMAL(24,2))) AS DECIMAL(18,9)) AS pct_desc
 FROM silver_checks c
 LEFT JOIN silver_locations l        ON c.LocationId = l.LocationId
 LEFT JOIN silver_revenue_centers rc ON c.CheckRevenueCenterId = rc.CheckRevenueCenterId

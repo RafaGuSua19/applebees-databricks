@@ -6,7 +6,27 @@ include:
   - resources/jobs/*.yml
   - resources/pipelines/*.yml
 
+variables:
+  catalog:
+    default: workspace
+  schema:
+    default: applebees_${bundle.target}_${workspace.current_user.short_name}
+  source_path:
+    default: /Volumes/workspace/default/applebees
+  failure_emails:
+    description: Destinatarios autorizados de fallos; configurar para operación compartida.
+    type: complex
+    default: []
+
+sync:
+  exclude:
+    - .local/**
+    - .git/**
+    - '**/__pycache__/**'
+
 targets:
   dev:
     mode: development
     default: true
+  qa:
+    mode: development

@@ -9,8 +9,12 @@ resources:
         timezone_id: America/Chicago
         pause_status: PAUSED                     # se activa al pasar a producción
       email_notifications:
-        on_failure:
-          - a01645436@tec.mx
+        on_failure: ${var.failure_emails}
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
       tasks:
         - task_key: refresh_pipeline
           description: Ingesta incremental y actualización de tablas silver y gold
@@ -26,6 +30,9 @@ resources:
             - task_key: refresh_pipeline
           notebook_task:
             notebook_path: ../../src/jobs/dq_gate.py
+            base_parameters:
+              catalog: '{{job.parameters.catalog}}'
+              schema: '{{job.parameters.schema}}'
           max_retries: 0
 
         - task_key: risk_alerts
@@ -34,5 +41,8 @@ resources:
             - task_key: data_quality_gate
           notebook_task:
             notebook_path: ../../src/jobs/alertas_riesgo.py
+            base_parameters:
+              catalog: '{{job.parameters.catalog}}'
+              schema: '{{job.parameters.schema}}'
           max_retries: 1
           min_retry_interval_millis: 60000

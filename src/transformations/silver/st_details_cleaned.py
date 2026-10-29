@@ -10,7 +10,7 @@ EMPLEADO = ["EMP 50", "EMP 25%", "EMP 10%", "EMP 50%", "TRAINER", "MIT MEAL", "H
 
 
 def _checks():
-    return (spark.readStream.table("bronze_checks")
+    return (spark.readStream.table("valid_checks")
             .withColumnRenamed("Id", "CheckId")
             .withColumnRenamed("RevenueCenterId", "CheckRevenueCenterId"))
 
@@ -22,6 +22,8 @@ def _checks():
 def silver_items():
     return (_checks().select(*KEYS, F.explode("ItemsSold").alias("i"))
             .select(*KEYS, "i.*").drop("Discounts")
+            .withColumn("GrossPrice", F.col("GrossPrice").cast("decimal(18,2)"))
+            .withColumn("SoldPrice", F.col("SoldPrice").cast("decimal(18,2)"))
             .withColumn("es_modificador", F.col("GrossPrice") == 0))
 
 
@@ -29,9 +31,12 @@ def silver_items():
            comment="Descuentos de nivel ticket e item (independientes), nombre normalizado y categoría de negocio.",
            cluster_by=["dt", "LocationId", "EmployeeId"], table_properties={"quality": "silver"})
 @dlt.expect("monto_no_negativo", "Amount >= 0")
-@dlt.expect("con_empleado", "EmployeeId IS NOT NULL")
+@dlt.expect("con_empleado", "EmployeeId IS NOT NULL AND EmployeeId > 0")
 def silver_discounts():
-    c = _checks()
+    return build_discounts(_checks())
+
+
+def build_discounts(c):
     nivel_check = (c.select(*KEYS, F.explode("Discounts").alias("d"))
                    .select(*KEYS, "d.*").withColumn("Nivel", F.lit("check")))
     nivel_item = (c.select(*KEYS, F.explode("ItemsSold").alias("i"))
@@ -39,14 +44,16 @@ def silver_discounts():
                   .select(*KEYS, "ItemId", "ItemName", "d.*").withColumn("Nivel", F.lit("item")))
     nombre = F.upper(F.trim(F.col("DiscountName")))       # MARKETING / Marketing -> MARKETING
     return (nivel_check.unionByName(nivel_item, allowMissingColumns=True)
+            .withColumn("Amount", F.col("Amount").cast("decimal(18,2)"))
             .withColumn("DiscountName", nombre)
             .withColumn("categoria",
                         F.when(F.col("DiscountName").isin(COMPS), "Compensación")
                          .when(F.col("DiscountName").isin(EMPLEADO), "Empleado")
                          .when(F.col("DiscountName") == "MANAGER", "Manager discrecional")
                          .otherwise("Promoción / lealtad"))
-            .withColumn("sin_gerente", F.col("ManagerId").isNull() | (F.col("ManagerId") == 0))
-            .withColumn("autoaprobado", F.coalesce(F.col("EmployeeId") == F.col("ManagerId"), F.lit(False))))
+            .withColumn("sin_gerente", F.col("ManagerId").isNull() | (F.col("ManagerId") <= 0))
+            .withColumn("autoaprobado", F.coalesce((F.col("EmployeeId") > 0) & (F.col("ManagerId") > 0)
+                                             & (F.col("EmployeeId") == F.col("ManagerId")), F.lit(False))))
 
 
 @dlt.table(name="silver_payments", comment="Una fila por pago. Tip = -Gratuity (el sistema guarda la propina en negativo).",
@@ -56,6 +63,8 @@ def silver_payments():
     return (_checks().select(*KEYS, F.explode("Payments").alias("p"))
             .select(*KEYS, "p.*")
             .withColumn("PayCatName", F.upper(F.trim("PayCatName")))
+            .withColumn("Amount", F.col("Amount").cast("decimal(18,2)"))
+            .withColumn("Gratuity", F.col("Gratuity").cast("decimal(18,2)"))
             .withColumn("Tip", -F.col("Gratuity")))
 
 
@@ -64,4 +73,5 @@ def silver_payments():
 @dlt.expect("void_no_negativo", "Amount >= 0")
 def silver_voids():
     return (_checks().select(*KEYS, F.explode("Voids").alias("v"))
-            .select(*KEYS, "v.*"))
+            .select(*KEYS, "v.*")
+            .withColumn("Amount", F.col("Amount").cast("decimal(18,2)")))

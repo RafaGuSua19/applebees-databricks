@@ -1,29 +1,18 @@
-# Fase 2 · Presentación del pipeline (requisitos de Sun Holdings)
+# Cobertura de los documentos de Fase 2
 
-Presentación: jueves 29 oct 2026, 3:50–3:55 PM Central (≈ 2:50 PM Guadalajara). Exactamente 5 minutos.
-Antes de presentar: enviar la URL del repositorio por el formulario (obligatorio).
+Fuentes: *Basic Databricks GitHub Repository Template – SH Shared Services & BI*, páginas 1–2, y *Phase 2: Pipeline Presentation*, entregables de página 2 y rúbrica de páginas 3–5. Los PDF se usan como criterios de evaluación, no como instrucciones para iniciar sesión, enviar formularios o preparar la presentación oral.
 
-## Entregables
-- Repositorio GitHub completo y organizado (notebooks, código, documentación, configuración, instrucciones).
-- Job de Databricks: programación o disparo, dependencias entre tareas, manejo de fallas y reprocesos.
-- Arquitectura: cómo fluyen los datos de la fuente a las tablas finales.
-- Transformaciones y tablas: limpieza, preparación, enriquecimiento, agregación; propósito y valor de cada tabla.
-- Calidad de datos: nulos, duplicados, registros inválidos, formatos inconsistentes, etc.
-- Buenas prácticas: streaming, materialized views, liquid clustering, expectations.
-- Análisis y valor de negocio a partir de las tablas finales.
+La plantilla exige separar `resources/jobs/`, `resources/pipelines/` y lógica de tablas en `src/transformations/silver/` y `gold/`. Esta estructura se conserva; bronze, pruebas, exploración y documentación la complementan. Los nombres de tablas mostrados en la plantilla son ejemplos, no entidades obligatorias del proyecto.
 
-## Estructura sugerida de la presentación
-1. Objetivo de negocio · 2. Datos fuente y arquitectura · 3. Transformaciones · 4. Calidad de datos · 5. Análisis final · 6. Conclusión.
+| Criterio visible | Cobertura en el repositorio | Evidencia para revisión |
+|---|---|---|
+| GitHub Repository & Documentation | Código, notebooks, configuración, requisitos, ejecución, recuperación y fuentes de evidencia organizados | README, `docs/`, `scripts/`, `.github/workflows/validate.yml` |
+| Job & Pipeline Design | Flujo completo de tres tareas, dependencias, disparo manual/diario, reintentos, concurrencia y reproceso | YAML de recursos, diagrama, `docs/operacion.md` y corridas en `docs/validacion.md` |
+| Transformations & Table Value | Limpieza, aplanado, importes, enriquecimiento y agregación explicados por grano y propósito | `src/transformations/`, `docs/diccionario.md`, notebooks 01/03 |
+| Streaming, Materialized Views, Liquid Clustering & Expectations | Uso implementado y justificación de incrementalidad, recálculo, clustering y reglas declarativas | Código, eventos de ejecución, `docs/operacion.md` y validación de clustering |
+| Data Quality Checks | Estructura/tipos, nulos, campos nuevos, duplicados, completitud, referencias, consistencia, precisión y excepciones | `docs/calidad.md`, pruebas unitarias/Spark, consultas y compuerta real |
+| Analysis, Insights & Business Value | Métricas verificables, denominadores explícitos, prioridades, límites y recomendaciones de calibración | `docs/validacion.md`, consultas de negocio y notebook 03 |
 
-## Rúbrica (1 a 4 cada criterio)
-- GitHub Repository & Documentation
-- Job & Pipeline Design
-- Transformations & Table Value
-- Streaming, Materialized Views, Liquid Clustering & Expectations
-- Data Quality Checks
-- Analysis, Insights & Business Value
-- Technical Communication
+Los siete entregables de la página 2 quedan representados en estas seis filas: repositorio, job, arquitectura, transformaciones/tablas, calidad, buenas prácticas y análisis. La preparación del material y la ejecución de la presentación oral se harán por separado cuando se soliciten. Este repositorio no garantiza una calificación: la evaluación también depende de su accesibilidad para los evaluadores y de la exposición del equipo.
 
-## Estructura de repo obligatoria (plantilla)
-resources/jobs/daily_orchestration_job.yml · resources/pipelines/lakeflow_pipeline.yml ·
-src/transformations/silver/ (st_*.py, mv_*.sql) · src/transformations/gold/ (st_*.py, mv_*.sql)
+La página 6 del PDF adjunto no contiene una fila legible de evaluación. No se inventa un criterio adicional ni un horario de presentación que no está en los documentos. El acceso externo a GitHub y el envío de la URL requieren comprobación por el equipo al entregar.

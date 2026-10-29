@@ -17,10 +17,16 @@ def _div(a, b):
 )
 @dlt.expect("score_valido", "score_riesgo BETWEEN 0 AND 7")
 def gold_riesgo_empleados():
-    items = spark.read.table("silver_items").filter("GrossPrice > 0")
-    desc = spark.read.table("silver_discounts").filter("Amount > 0")
-    checks = spark.read.table("silver_checks").select(*K, "tipo_pago", "abierto_4h")
-    emp = spark.read.table("silver_employees")
+    return build_risk(spark.read.table("silver_items"), spark.read.table("silver_discounts"),
+                      spark.read.table("silver_checks"), spark.read.table("silver_employees"))
+
+
+def build_risk(items, desc, checks, emp):
+    emp = emp.filter("EmployeeId > 0")
+    identified = emp.select("EmployeeId").distinct()
+    items = items.filter("GrossPrice > 0").join(identified, "EmployeeId", "left_semi")
+    desc = desc.filter("Amount > 0").join(identified, "EmployeeId", "left_semi")
+    checks = checks.select(*K, "tipo_pago", "abierto_4h")
     corte = checks.agg(F.max("dt").alias("fecha_corte"))
 
     venta = (items.groupBy("LocationId", "EmployeeId")

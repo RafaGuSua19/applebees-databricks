@@ -6,7 +6,7 @@ APPS = "'DOORDASH','UBEREATS','GRUBHUB','POSTMATES','DELIVERLOGIC','BITESQUAD','
 
 
 def _suma(arr, campo):
-    return F.expr(f"coalesce(aggregate({arr}, 0D, (acc, x) -> acc + coalesce(x.{campo}, 0D)), 0D)")
+    return F.expr(f"coalesce(aggregate({arr}, CAST(0 AS DECIMAL(18,2)), (acc, x) -> CAST(acc + coalesce(CAST(x.{campo} AS DECIMAL(18,2)), 0) AS DECIMAL(18,2))), CAST(0 AS DECIMAL(18,2)))")
 
 
 def _existe(cond):
@@ -24,14 +24,18 @@ def _existe(cond):
 @dlt.expect("conciliacion_cuadra", "abs(paid - (sold - disc_check + tax + tip)) <= 0.05")
 @dlt.expect("horario_valido", "min_abierto IS NOT NULL AND min_abierto >= 0")
 def silver_checks():
-    c = (spark.readStream.table("bronze_checks")
+    return build_checks(spark.readStream.table("valid_checks"))
+
+
+def build_checks(source):
+    c = (source
          .withColumnRenamed("Id", "CheckId")
          .withColumnRenamed("RevenueCenterId", "CheckRevenueCenterId"))
 
-    cash = _existe("upper(p.PayCatName) = 'CASH'")
+    cash = _existe("upper(trim(p.PayCatName)) = 'CASH'")
     card = _existe("p.IsCreditCard")
     gift = _existe("p.IsGiftCard")
-    app = _existe(f"upper(p.PayCatName) IN ({APPS})")
+    app = _existe(f"upper(trim(p.PayCatName)) IN ({APPS})")
     n_pagos = F.coalesce(F.size("Payments"), F.lit(0))
 
     tipo_pago = (F.when(n_pagos <= 0, "Sin pago")
@@ -53,8 +57,10 @@ def silver_checks():
             F.greatest(F.coalesce(F.expr("size(filter(ItemsSold, x -> x.GrossPrice > 0))"), F.lit(0)), F.lit(0)).alias("n_items_con_precio"),
             _suma("ItemsSold", "GrossPrice").alias("gross"),
             _suma("ItemsSold", "SoldPrice").alias("sold"),
-            F.expr("""coalesce(aggregate(ItemsSold, 0D, (acc, x) -> acc +
-                      coalesce(aggregate(x.Discounts, 0D, (a, d) -> a + coalesce(d.Amount, 0D)), 0D)), 0D)""").alias("disc_item"),
+            F.expr("""coalesce(aggregate(ItemsSold, CAST(0 AS DECIMAL(18,2)), (acc, x) ->
+                      CAST(acc + coalesce(aggregate(x.Discounts, CAST(0 AS DECIMAL(18,2)),
+                        (a, d) -> CAST(a + coalesce(CAST(d.Amount AS DECIMAL(18,2)), 0) AS DECIMAL(18,2))), 0)
+                        AS DECIMAL(18,2))), CAST(0 AS DECIMAL(18,2)))""").alias("disc_item"),
             _suma("Discounts", "Amount").alias("disc_check"),
             _suma("Voids", "Amount").alias("voids"),
             F.greatest(F.coalesce(F.size("Voids"), F.lit(0)), F.lit(0)).alias("n_voids"),

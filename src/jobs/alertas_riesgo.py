@@ -2,7 +2,12 @@
 # Alertas de riesgo para operaciones: empleados y tiendas a revisar.
 from pyspark.sql import functions as F
 
-ESQUEMA = "workspace.applebees"
+from quality_rules import qualified_schema
+
+dbutils.widgets.text("catalog", "workspace")
+dbutils.widgets.text("schema", "applebees")
+ESQUEMA = qualified_schema(dbutils.widgets.get("catalog"), dbutils.widgets.get("schema"))
+print("Señales para revisión humana; no constituyen prueba de abuso o fraude.")
 
 emp = spark.table(f"{ESQUEMA}.gold_riesgo_empleados")
 print("Empleados por nivel de riesgo:")
