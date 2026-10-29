@@ -1,5 +1,7 @@
 # Diccionario de tablas
 
+Esta es la referencia de grano y propósito de todas las capas. El [diccionario de datos Gold](diccionario_datos.md) detalla cada columna y sus reglas.
+
 Todas las tablas viven en el catálogo y esquema definidos por el target. Los nombres siguientes son relativos a ese esquema. `dt` es DATE; IDs son BIGINT; importes base de silver se convierten a DECIMAL(18,2); la aritmética derivada y las agregaciones monetarias amplían precisión. Las tasas son proporciones, no porcentajes multiplicados por 100.
 
 | Tabla | Tipo | Grano / llave lógica | Campos y propósito |

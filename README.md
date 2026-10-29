@@ -9,7 +9,8 @@ Pipeline de **Sun Holdings × Databricks Data Challenge** que transforma tickets
 - [Despliegue, programación y recuperación](docs/operacion.md)
 - [Contrato de calidad y excepciones](docs/calidad.md)
 - [Diccionario de tablas](docs/diccionario.md)
-- [Qué incluir en el commit](docs/entrega.md)
+- [Columnas y reglas de la capa Gold](docs/diccionario_datos.md)
+- [Archivos de entrega y push a main](docs/entrega.md)
 
 ## Arquitectura
 

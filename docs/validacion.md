@@ -1,6 +1,6 @@
 # Validación de la entrega · 29 de octubre de 2026
 
-La versión revisada se desplegó y ejecutó con los 115 archivos reales en **`workspace.applebees_qa_a01706880`**, usando la fuente original de solo lectura. La instancia histórica `workspace.applebees` se conservó. Esta evidencia corresponde al código local que se prepara para commit; el commit base era `d0410d7`.
+La versión revisada se desplegó y ejecutó con los 115 archivos reales en **`workspace.applebees_qa_a01706880`**, usando la fuente original de solo lectura. La instancia histórica `workspace.applebees` se conservó. Esta evidencia corresponde al código guardado en `f719b2a`, cuya base era `d0410d7`. La integración posterior del diccionario de `ca25dd5` solo modifica documentación; los archivos del manifiesto de fuentes conservan sus hashes.
 
 ## Evidencia de ejecución
 
