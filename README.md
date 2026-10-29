@@ -126,6 +126,29 @@ databricks bundle deploy -t dev
 databricks bundle run daily_orchestration_job -t dev
 ```
 
+## Resultados del pipeline (carga completa de 115 días)
+
+**Calidad:** 2,142,846 tickets · 115 días · 127 tiendas · **0 llaves duplicadas** · **99.996 %** de los tickets concilian al centavo (78 fuera de ±$0.05) · 0 registros con esquema inesperado. La compuerta de calidad pasó y el job terminó sus 3 tareas.
+
+**El pipeline reproduce los hallazgos del EDA**, ahora calculados desde las tablas gold de forma automática:
+
+| Indicador | EDA (Fase 1) | Pipeline (`gold_*`) |
+|---|---|---|
+| Venta bruta / descuento total | $87.3 M / $3.02 M | $87.32 M / $3.02 M (3.46 %) |
+| Efectivo: % de la venta → % del descuento | 17 % → 55 % | 17.5 % → 55.2 % |
+| Tasa de descuento To Go vs In-Store | 3× | 12.2 % vs 3.8 % (3.2×) |
+| Tasa de descuento en tickets abiertos 4 h+ | 21.2 % | 21.2 % (resto: 3.3 %) |
+| Descuento en tickets descontados al 100 % | 37 % ($1.11 M) | 36.7 % ($1.11 M) |
+| Empleados que descuentan ≥ 3× su tienda | 41 | 41 |
+
+**Motor de riesgo:** 2,960 empleados evaluados (≥ 100 líneas vendidas) → **34 Alto** · 938 Medio · 1,988 Bajo.
+- Los 34 de riesgo alto están repartidos en 26 tiendas. Sus señales más frecuentes: los 34 tienen ≥ 50 % de su descuento en efectivo; 31 tienen ≥ 5 tickets abiertos 4 h+ con descuento; 29 concentran ≥ 30 % en MANAGER o WALKOUT; 19 tienen ≥ 10 % de descuentos sin gerente; 16 descuentan ≥ 2× la mediana de su tienda.
+- **Tiendas a revisar primero** (`gold_riesgo_tiendas`): Gateway (8) y Weslaco (47) con 3 empleados en riesgo alto cada una; Park Mall (139), Altus (41), Lancaster (170) y Bob Bullock (100) con 2.
+- Por categoría (`silver_discounts`): promociones 40.5 %, compensaciones 32.7 %, comidas de empleado 14.7 % y MANAGER discrecional 12.1 % ($367 K, el código individual más usado).
+- 20 empleados tienen descuentos autoaprobados (mismo ID aplica y autoriza): falla directa del control de autorización.
+
+**Siguiente paso: calibración.** La regla de efectivo se activa en la mitad de los empleados (1,482 de 2,960), porque el efectivo concentra el descuento en toda la cadena; por eso el nivel Medio es amplio. Proponemos calibrar los umbrales con prevención de pérdidas (por ejemplo, comparar el % en efectivo contra el de su propia tienda) y llevar `gold_riesgo_*` a un tablero y a un agente Genie.
+
 ## Hallazgos principales (EDA, Fase 1)
 
 - El efectivo es ~17 % de la venta pero concentra **55 % del descuento**; descuenta 5.6× más que la tarjeta aun sin comidas de empleados.
@@ -134,4 +157,7 @@ databricks bundle run daily_orchestration_job -t dev
 - To Go descuenta 3× más que In-Store; 3 tiendas están casi al doble de la mediana; 41 empleados descuentan ≥ 3× que su tienda.
 
 ## Equipo
-[Nombres del equipo]
+- José Rafael Gutiérrez Suárez
+- Ebony Leticia Valadez Valverde
+- César Morán Macías
+- Juan Braulio Olivares Rodríguez
