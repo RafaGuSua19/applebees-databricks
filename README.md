@@ -92,7 +92,7 @@ Nivel: **Alto** ≥ 4 · **Medio** 2–3 · **Bajo** 0–1. Los umbrales son ini
 
 | Práctica | Cómo se aplica |
 |---|---|
-| **Streaming / ingesta incremental** | Auto Loader en `bronze_checks` y streaming tables en silver: cada corrida procesa **solo los archivos nuevos** (un JSON por día) gracias a los checkpoints. Modo *triggered*, no *continuous*: los datos llegan una vez al día, así que un pipeline siempre encendido no aporta y cuesta más. |
+| **Streaming / ingesta incremental** | Auto Loader en `bronze_checks` y streaming tables en silver: cada corrida procesa **solo los archivos nuevos** (un JSON por día) gracias a los checkpoints. Cada archivo es un arreglo JSON de 70–90 MB en una sola línea: se lee como texto y se convierte con un **esquema explícito** (`from_json`), lo que evita inferir el esquema y agotar la memoria de serverless; además se procesa **un archivo por lote** (`maxFilesPerTrigger = 1`). Modo *triggered*, no *continuous*: los datos llegan una vez al día, así que un pipeline siempre encendido no aporta y cuesta más. |
 | **Materialized views** | Catálogos y todas las tablas gold: se recalculan de forma incremental cuando cambian sus fuentes y siempre están listas para el tablero. |
 | **Liquid clustering** | `cluster_by` por `dt` y `LocationId` (y `EmployeeId` en descuentos): son los filtros de casi todas las consultas (por día, por tienda, por empleado). Reemplaza el particionado fijo y se adapta si cambian los patrones de consulta. |
 | **Expectations** | Reglas declarativas con métricas por corrida; `expect_or_drop` solo donde el registro sería inutilizable (sin llave). |
