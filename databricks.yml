@@ -1,0 +1,12 @@
+# Databricks Asset Bundle: define el pipeline y el job de este repositorio
+bundle:
+  name: applebees_descuentos
+
+include:
+  - resources/jobs/*.yml
+  - resources/pipelines/*.yml
+
+targets:
+  dev:
+    mode: development
+    default: true

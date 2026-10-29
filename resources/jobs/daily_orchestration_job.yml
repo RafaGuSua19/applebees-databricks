@@ -1,0 +1,38 @@
+# Job diario: actualiza el pipeline, valida calidad y genera alertas de riesgo
+resources:
+  jobs:
+    daily_orchestration_job:
+      name: applebees_daily_orchestration
+      max_concurrent_runs: 1
+      schedule:
+        quartz_cron_expression: "0 0 6 * * ?"   # todos los días 6:00 AM
+        timezone_id: America/Chicago
+        pause_status: PAUSED                     # se activa al pasar a producción
+      email_notifications:
+        on_failure:
+          - a01645436@tec.mx
+      tasks:
+        - task_key: refresh_pipeline
+          description: Ingesta incremental y actualización de tablas silver y gold
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.applebees_pipeline.id}
+            full_refresh: false
+          max_retries: 2
+          min_retry_interval_millis: 300000
+
+        - task_key: data_quality_gate
+          description: Detiene el job si fallan las reglas de calidad (duplicados, conciliación, datos rescatados)
+          depends_on:
+            - task_key: refresh_pipeline
+          notebook_task:
+            notebook_path: ../../src/jobs/dq_gate.py
+          max_retries: 0
+
+        - task_key: risk_alerts
+          description: Resume empleados y tiendas con riesgo alto para operaciones
+          depends_on:
+            - task_key: data_quality_gate
+          notebook_task:
+            notebook_path: ../../src/jobs/alertas_riesgo.py
+          max_retries: 1
+          min_retry_interval_millis: 60000

@@ -1,0 +1,8 @@
+.databricks/
+.DS_Store
+__pycache__/
+*.pyc
+# Nunca subir los datos de la empresa al repositorio
+*.json
+!resources/**/*.json
+*.zip

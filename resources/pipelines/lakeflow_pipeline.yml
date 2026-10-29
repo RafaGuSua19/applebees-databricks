@@ -1,0 +1,16 @@
+# Pipeline declarativo de Lakeflow (antes Delta Live Tables)
+# bronze (Auto Loader) -> silver (streaming tables + expectations) -> gold (materialized views)
+resources:
+  pipelines:
+    applebees_pipeline:
+      name: applebees_descuentos_pipeline
+      catalog: workspace
+      schema: applebees
+      serverless: true
+      continuous: false          # modo triggered: los datos llegan 1 archivo por día
+      channel: CURRENT
+      configuration:
+        source_path: /Volumes/workspace/default/applebees
+      libraries:
+        - glob:
+            include: ../../src/transformations/**
