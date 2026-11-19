@@ -1,28 +1,26 @@
 # Applebee's · Monitoreo de descuentos
 
-Pipeline de **Sun Holdings × Databricks Data Challenge** que transforma tickets de RMH Applebee's en datos conciliados y señales explicables para priorizar revisiones de descuentos. El score orienta una revisión humana; no determina por sí solo abuso ni fraude.
+Pipeline para el **Sun Holdings × Databricks Data Challenge** que convierte los tickets diarios de RMH Applebee's en datos conciliados y en un score de riesgo por empleado, para que operaciones sepa a quién y qué tienda revisar primero. El score prioriza la revisión; la decisión final la toma una persona.
 
-**Fuente de referencia:** 115 días, del 28 de abril al 20 de agosto de 2026, más cuatro catálogos JSON. Los datos permanecen en el volumen de Unity Catalog y no se incluyen en GitHub.
+**Datos:** 115 días de tickets (28 abr – 20 ago 2026) y cuatro catálogos JSON. Los datos viven en un volumen de Unity Catalog y no se suben a GitHub.
 
-- [Validación y evidencia de ejecución](docs/validacion.md)
-- [Correspondencia con la rúbrica](docs/fase2_requisitos.md)
-- [Despliegue, programación y recuperación](docs/operacion.md)
-- [Contrato de calidad y excepciones](docs/calidad.md)
-- [Diccionario de tablas](docs/diccionario.md)
-- [Columnas y reglas de la capa Gold](docs/diccionario_datos.md)
-- [Archivos de entrega y push a main](docs/entrega.md)
-
-## Fase 3 · Idea Submission
-
-[Decisiones, implementación y evidencia de Fase 3](docs/fase3.md) · [Guion de presentación](docs/fase3_guion.md)
+| Documento | Contenido |
+|---|---|
+| [Validación](docs/validacion.md) | Corridas, conteos y resultados verificados |
+| [Requisitos de Fase 2](docs/fase2_requisitos.md) | Dónde se cubre cada criterio de la rúbrica |
+| [Operación](docs/operacion.md) | Despliegue, horario, fallas, Repair run y full refresh |
+| [Calidad](docs/calidad.md) | Reglas de calidad y excepciones |
+| [Diccionario de tablas](docs/diccionario.md) · [Columnas gold](docs/diccionario_datos.md) | Grano, propósito y columnas |
+| [Fase 3](docs/fase3.md) · [Modelo v2](docs/modelo_v2.md) | Cola diaria de revisión, modelo y resultados |
+| [Demo](docs/demo_fase3.md) · [Guion](docs/fase3_guion.md) | Simulación de días nuevos y guion del pitch |
 
 ## Arquitectura
 
 ```mermaid
 flowchart LR
-  A[JSON diarios en Unity Catalog Volume] -->|Auto Loader · un archivo por lote| B[bronze_checks · JSON y trazabilidad]
+  A[JSON diarios en Volume] -->|Auto Loader · un archivo por lote| B[bronze_checks]
   D[Catálogos JSON] --> BD[bronze_locations · revenue_centers · employees · items]
-  B --> V[valid_checks · admisión común]
+  B --> V[valid_checks]
   B --> Q[gold_calidad_datos]
   V --> C[silver_checks]
   V --> L[silver_items · discounts · payments · voids]
@@ -30,105 +28,107 @@ flowchart LR
   C & L & SD --> G[gold_kpis_diarios · riesgo_empleados · riesgo_tiendas]
   C & L & SD & G --> Q
   Q --> J{Compuerta de calidad}
-  J -->|aprobada| R[Resumen de riesgo en el job]
-  J -->|aprobada| M[Score contextual por ticket y cola]
+  J -->|aprobada| R[Alertas de riesgo]
+  J -->|aprobada| M[Cola diaria de revisión]
   M --> AIBI[Dashboard AI/BI]
 ```
 
-El job ejecuta **pipeline → compuerta de calidad → resumen de riesgo y publicación de la cola**. Las dependencias impiden emitir alertas cuando falla una tarea previa. El pipeline es triggered, con ejecución manual o programación diaria a las 06:00 `America/Chicago`, pausada en desarrollo. Hay una sola corrida concurrente y reintentos para errores transitorios.
+El job corre **pipeline → compuerta de calidad → alertas de riesgo y publicación de la cola**. Si una tarea falla, las siguientes no se ejecutan, así que nunca se emiten alertas con datos que no pasaron calidad. El pipeline es *triggered* (los datos llegan una vez al día), con programación diaria a las 06:00 `America/Chicago`, pausada mientras estamos en desarrollo. Solo se permite una corrida a la vez y hay reintentos para fallas transitorias.
 
 ## Organización
 
 ```text
-├── databricks.yml                 # Variables y targets dev/qa aislados por usuario
+├── databricks.yml        # Asset Bundle: variables y targets dev / qa
 ├── resources/
-│   ├── jobs/                      # Orquestación diaria y validación de QA
-│   └── pipelines/                 # Lakeflow serverless
+│   ├── jobs/             # Orquestación diaria y job de validación (qa)
+│   └── pipelines/        # Pipeline Lakeflow serverless
 ├── src/
 │   ├── transformations/
-│   │   ├── bronze/                # Ingesta, contrato y catálogos
-│   │   ├── silver/                # Aplanado, importes y dimensiones
-│   │   └── gold/                  # KPIs, riesgo y métricas de calidad
-│   └── jobs/                      # Compuerta, reglas puras y resumen de riesgo
-├── exploration/                   # Tres notebooks reproducibles de solo lectura
-├── tests/unit/                    # Reglas de calidad sin infraestructura
-├── tests/acceptance/              # Pruebas con Spark real y dataset completo
-├── validation/sql/                # Consultas independientes de evidencia agregada
-├── scripts/                       # Validación local y recolección de evidencia
-├── docs/                          # Documentación de entrega
-└── .github/workflows/              # Verificación local automática en push/PR
+│   │   ├── bronze/       # Ingesta y catálogos
+│   │   ├── silver/       # Aplanado, importes y dimensiones
+│   │   └── gold/         # KPIs, riesgo y métricas de calidad
+│   └── jobs/             # Compuerta de calidad y alertas
+├── exploration/          # Notebooks del EDA (Fase 1)
+├── tests/                # Pruebas unitarias y de aceptación
+├── validation/sql/       # Consultas para verificar resultados
+├── scripts/              # Validación local y evidencia
+└── docs/
 ```
 
-`.local/` contiene únicamente trabajo local ignorado: auditoría anterior, respuestas de API y registros de las pruebas. `.databricks/` contiene el estado local del bundle, también ignorado. Todo lo demás que aparece en `git status --short` forma parte de la entrega; consultar [el manifiesto](docs/entrega.md).
-
-## Ejecutar y comprobar
+## Cómo ejecutarlo
 
 ```bash
 python3 scripts/validate_local.py
-databricks bundle validate -t qa -p APPLEBEES
-databricks bundle plan -t qa -p APPLEBEES
-databricks bundle deploy -t qa -p APPLEBEES
-databricks bundle run daily_orchestration_job -t qa -p APPLEBEES
-databricks bundle run validation_job -t qa -p APPLEBEES
+databricks bundle validate -t qa
+databricks bundle deploy -t qa
+databricks bundle run daily_orchestration_job -t qa
+databricks bundle run validation_job -t qa
 ```
 
-Se requiere acceso al volumen, permisos para crear tablas y recursos en el catálogo de destino y serverless habilitado. Cambiar `APPLEBEES` por el perfil autenticado que corresponda. El target publica en `workspace.applebees_qa_<usuario>`, sin reutilizar por defecto las tablas de otra persona. El job de validación comprueba las transformaciones con datos sintéticos, los totales de referencia y la ejecución de los tres notebooks.
-
-Los parámetros `catalog`, `schema`, `source_path` y `failure_emails` permiten configurar otras instancias. [La guía de operación](docs/operacion.md) explica permisos, variables, notificaciones, adopción del despliegue compartido y full refresh. Un push a `main` no despliega automáticamente Databricks.
+Se necesita acceso de lectura al volumen, permisos para crear tablas en el catálogo y cómputo serverless. Cada target publica en su propio esquema (`workspace.applebees_<target>_<usuario>`) para que nadie sobrescriba las tablas de otro. Los parámetros `catalog`, `schema`, `source_path` y `failure_emails` se pueden cambiar por target; ver [operación](docs/operacion.md).
 
 ## Transformaciones y valor
 
-| Resultado | Transformación principal | Uso |
+| Tabla | Transformación principal | Uso |
 |---|---|---|
-| `bronze_checks` | JSON por ticket, esquema explícito, detección de campos extra y errores, trazabilidad | Recuperar y auditar lo recibido |
-| `silver_checks` | Llave compuesta; suma decimal de importes; conciliación; tipo de pago; duración | Base confiable de métricas por ticket |
-| `silver_items` | Explosión de líneas; modificadores a $0 identificados | Venta y volumen atribuibles al empleado |
-| `silver_discounts` | Unión de descuentos de item/ticket; nombres normalizados; categorías y autorización | Explicar el origen y control del descuento |
-| `silver_payments` / `silver_voids` | Movimientos separados; propina con signo corregido; reversos preservados | Revisar pagos y anulaciones |
-| Dimensiones silver | IDs consolidados; atributos necesarios; sin datos personales directos de empleados | Enriquecer sin multiplicar filas |
-| `gold_kpis_diarios` | Día × tienda × canal × pago | Tendencias, comparaciones y futura visualización |
-| `gold_riesgo_empleados` | Empleado × tienda; reglas contra su mediana local | Priorizar revisión de expedientes |
-| `gold_riesgo_tiendas` | Agregados y conteo de empleados en riesgo por tienda | Dirigir capacidad de revisión de operaciones |
-| `gold_revision_descuentos` | Contexto de 28 días, señales explicadas y ranking por importe | Cola operativa de revisión y benchmark |
-| `gold_calidad_datos` | Completitud, unicidad, referencias, conciliación y excepciones | Decidir si se pueden emitir alertas |
+| `bronze_checks` | Un registro por ticket con esquema explícito; guarda el JSON original, archivo de origen y motivo de rechazo | Trazabilidad y auditoría |
+| `silver_checks` | Llave `LocationId + dt + CheckId`; importes en decimal; conciliación; tipo de pago; minutos abierto | Métricas por ticket |
+| `silver_items` | Una fila por línea; modificadores a $0 marcados | Venta atribuible al empleado |
+| `silver_discounts` | Descuentos de item y de ticket juntos; nombres normalizados; categoría y autorización | Saber quién descontó, quién autorizó y de qué tipo |
+| `silver_payments` / `silver_voids` | Pagos y anulaciones por separado; propina con signo corregido | Revisión de pagos y anulaciones |
+| Dimensiones silver | Tiendas, canales y empleados sin datos personales | Enriquecer sin duplicar filas |
+| `gold_kpis_diarios` | Día × tienda × canal × tipo de pago | Tablero y tendencias |
+| `gold_riesgo_empleados` | Empleado × tienda comparado contra la mediana de su tienda | Priorizar revisiones |
+| `gold_riesgo_tiendas` | Agregados y empleados en riesgo por tienda | Dirigir visitas de operaciones |
+| `gold_revision_descuentos` | Score por ticket contra sus 28 días previos y la conducta del empleado | Cola diaria de 20 tickets para revisar |
+| `gold_calidad_datos` | Completitud, unicidad, referencias y conciliación | Decidir si se emiten alertas |
 
-**Reglas contables:** `GrossPrice` ya incluye la cantidad; no se vuelve a multiplicar. `disc_item` ya está restado en `sold`; `disc_check` se resta después. Por tanto, `descuento = disc_item + disc_check`, `venta_neta = sold - disc_check` y `paid = venta_neta + tax + tip`. `tip = -Gratuity`, conservando anomalías de signo. `PayCatName`, normalizado, identifica efectivo; `IsCashDebit` no lo identifica correctamente.
+**Reglas contables (validadas en el EDA):** `GrossPrice` ya es total de línea. El descuento de item ya viene restado en `sold` y el de ticket se resta después, así que `descuento = disc_item + disc_check`, `venta_neta = sold − disc_check` y `paid = venta_neta + tax + tip`. `Gratuity` viene negativa en la fuente, por eso `tip = −Gratuity`. El efectivo se identifica con `PayCatName = CASH`; `IsCashDebit` no sirve para eso.
 
 ## Motor de riesgo
 
-Población: pares **empleado–tienda**, con ID positivo presente en el catálogo y al menos 100 líneas vendidas con precio positivo. La comparación usa la mediana de empleados elegibles de la misma tienda.
+Se evalúa cada par **empleado–tienda** con al menos 100 líneas vendidas, comparado contra la mediana de su propia tienda para no castigar sucursales con más promociones.
 
 | Señal | Puntos |
 |---|---:|
-| Tasa de descuento ≥3× la mediana de su tienda; ≥2× suma uno | 2 |
-| ≥50% del descuento en tickets de efectivo | 1 |
-| ≥30% en MANAGER o WALKOUT | 1 |
-| ≥10% de descuentos sin gerente identificado | 1 |
-| Al menos una autoaprobación con IDs positivos e iguales | 1 |
-| Al menos cinco tickets abiertos cuatro horas con descuento | 1 |
+| Tasa de descuento ≥ 3× la mediana de su tienda (≥ 2× suma 1) | 2 |
+| ≥ 50 % de su descuento en tickets pagados en efectivo | 1 |
+| ≥ 30 % en MANAGER o WALKOUT | 1 |
+| ≥ 10 % de sus descuentos sin gerente registrado | 1 |
+| Al menos una autoaprobación (mismo ID aplica y autoriza) | 1 |
+| ≥ 5 tickets abiertos 4 h o más con descuento | 1 |
 
-**Alto:** 4–7 · **Medio:** 2–3 · **Bajo:** 0–1. Divisiones entre cero quedan nulas y esa señal no suma puntos. Los umbrales requieren calibración con prevención de pérdidas; una señal frecuente en toda la cadena puede tener poco poder discriminante. La venta corresponde a líneas registradas por el empleado y el descuento a movimientos que aplicó; no es un cálculo de rentabilidad individual.
+**Alto:** 4–7 · **Medio:** 2–3 · **Bajo:** 0–1. Los umbrales son un punto de partida para calibrar con prevención de pérdidas.
 
-## Calidad y prácticas de ingeniería
+## Calidad y buenas prácticas
 
-- **Ingesta incremental:** Auto Loader y checkpoints procesan archivos nuevos e inmutables. Una segunda corrida sin nuevas entradas debe conservar conteos e importes. Cambios de lógica histórica requieren full refresh.
-- **Cuarentena recuperable:** los tickets con errores conservan JSON y motivo en bronze. Tickets y detalles comparten la admisión a Silver. Campos nuevos, ID de ítem ausente y propina desconocida generan advertencias. La compuerta bloquea la publicación de alertas ante un registro en cuarentena.
-- **Completitud y exactitud:** comparación de conteos entre capas, llaves únicas, referencias válidas y conciliación ≥95% tanto global como por día. Montos `DECIMAL(18,2)` y tolerancia contable de $0.05.
-- **Expectations:** errores y advertencias visibles por tabla. Anomalías comerciales se conservan y cuentan; no se eliminan para mejorar indicadores.
-- **Materialized views:** catálogos y gold se actualizan según dependencias; Databricks elige actualización incremental o recálculo completo. No se promete incrementalidad para todos los planes.
-- **Liquid clustering:** fecha/tienda y empleado en descuentos, según filtros previstos, sin particionado fijo.
-- **Privacidad:** datos personales directos del catálogo de empleados limitados a bronze; consumidores con permisos sobre tablas necesarias. Los IDs siguen siendo seudónimos, no datos anónimos.
-- **Reproducibilidad:** configuración declarativa, pruebas de errores y límites, consultas independientes, CI local y evidencia de ejecuciones reales.
+- **Ingesta incremental:** Auto Loader con checkpoints procesa solo archivos nuevos. Una segunda corrida sin archivos nuevos deja los mismos conteos e importes (probado).
+- **Cuarentena y advertencias:** los tickets con errores graves se quedan en bronze con su JSON y el motivo, y la compuerta bloquea las alertas. Un campo nuevo, un artículo sin ID o una propina ausente solo generan una advertencia: el ticket sigue a silver.
+- **Compuerta de calidad:** llaves únicas, mismos conteos entre capas, referencias válidas y conciliación ≥ 95 % global y por día.
+- **Expectations:** reglas por tabla con métricas en cada corrida. Las anomalías de negocio se conservan y se cuentan.
+- **Materialized views** para catálogos y gold; **liquid clustering** por fecha/tienda (y empleado en descuentos).
+- **Privacidad:** nombre, fecha de nacimiento e `IsMinor` de empleados no salen de bronze; gold solo usa IDs.
 
-## Resultados y decisiones de negocio
+## Resultados
 
-**Carga validada:** 2,142,846 tickets, 127 tiendas, $87.32 M de venta y $3.02 M de descuento. Cero llaves duplicadas y 99.99636% de conciliación. El score evalúa 2,959 pares empleado–tienda: 34 Alto, 937 Medio y 1,988 Bajo.
+**Carga completa:** 2,142,846 tickets · 127 tiendas · $87.32 M de venta · $3.02 M de descuento (3.46 %) · 0 llaves duplicadas · 99.996 % de tickets conciliados.
 
-El [informe de validación](docs/validacion.md) registra los valores de la versión revisada, las corridas, las anomalías y las limitaciones. Las consultas en `validation/sql/` y el notebook `exploration/03_eda_descuentos.py` permiten reproducirlos sin tablas históricas externas al bundle.
+| Hallazgo | Resultado |
+|---|---|
+| Efectivo: % de la venta → % del descuento | 17.5 % → 55.2 % |
+| Tasa de descuento To Go vs In-Store | 12.2 % vs 3.8 % (3.2×) |
+| Tickets abiertos 4 h+ vs resto | 21.2 % vs 3.2 % |
+| Descuento en tickets descontados al 100 % | 36.7 % ($1.11 M) |
+| Empleados que descuentan ≥ 3× su tienda | 41 |
+| Motor de riesgo (2,959 evaluados) | **34 Alto** · 937 Medio · 1,988 Bajo |
 
-![Comparaciones verificadas de efectivo, canal y duración](docs/assets/comparaciones.png)
+Los 34 de riesgo alto están en 26 tiendas. Detalle en [validación](docs/validacion.md).
 
-Las comparaciones centrales son la participación del efectivo en venta frente a descuento, la tasa de To Go frente a In-Store, los tickets abiertos cuatro horas y la concentración de descuentos completos. Sirven para revisar autorización, cierre de tickets y diferencias de proceso. Los importes asociados a señales no equivalen a pérdidas confirmadas ni a ahorro prometido.
+![Comparaciones de efectivo, canal y duración](docs/assets/comparaciones.png)
+
+## Fase 3: cola diaria de revisión
+
+Cada día se arma una cola de 20 tickets con descuento para revisar primero. Cada ticket se compara con tickets parecidos de los 28 días anteriores (misma tienda, canal y forma de pago) y suma puntos por tasa inusual, autoaprobación, MANAGER/WALKOUT sin gerente, ticket de 4 h+ y conducta inusual del empleado. Para probarla con datos nuevos, simulamos días posteriores al dataset con abuso sembrado: en 7 días la cola encontró **45 de 56 empleado-días sembrados (80 %)**, contra 43 % de ordenar por monto. Detalle en [Fase 3](docs/fase3.md).
 
 ## Equipo
 

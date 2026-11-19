@@ -50,14 +50,12 @@ Simulador ──► Volumen demo ──► Auto Loader ──► Silver ──�
 
 ## Ensayos iniciales con la v1
 
-[Dashboard de demo](https://dbc-eb170ead-6845.cloud.databricks.com/dashboardsv3/01f1e3d2467715c89940a6cd05daec17/published?w=7474659154935244) · [Dashboard de datos reales](https://dbc-eb170ead-6845.cloud.databricks.com/dashboardsv3/01f1e3bc8da91e4d95ee22717db572ee/published?w=7474659154935244)
-
-Se copiaron 35 días reales, del 17 de julio al 20 de agosto de 2026. La [preparación](https://dbc-eb170ead-6845.cloud.databricks.com/?o=7474659154935244#job/871414720392241/run/191789031304602) tardó 144.8 s y la [carga base](https://dbc-eb170ead-6845.cloud.databricks.com/jobs/737955808701802/runs/426669643952349?o=7474659154935244) tardó 184.1 s. Los tiempos de los ensayos incluyen generación, ingesta incremental, calidad y publicación de la cola.
+Se copiaron 35 días reales, del 17 de julio al 20 de agosto de 2026. La preparación tardó 144.8 s y la carga base tardó 184.1 s. Los tiempos de los ensayos incluyen generación, ingesta incremental, calidad y publicación de la cola.
 
 | Día de negocio y corrida | Tiempo | Tickets generados | Sembrados | En la cola | En el top 20 por importe |
 |---|---:|---:|---:|---:|---:|
-| [21 de agosto](https://dbc-eb170ead-6845.cloud.databricks.com/jobs/313690563199164/runs/515253697281654?o=7474659154935244) | 270.4 s | 22,346 | 112 | 10 | 4 |
-| [22 de agosto](https://dbc-eb170ead-6845.cloud.databricks.com/jobs/313690563199164/runs/922274298740216?o=7474659154935244) | 261.5 s | 18,650 | 92 | 13 | 9 |
+| 21 de agosto | 270.4 s | 22,346 | 112 | 10 | 4 |
+| 22 de agosto | 261.5 s | 18,650 | 92 | 13 | 9 |
 | Total | | 40,996 | 204 | 23 | 13 |
 
 Resultado de [fase3_simulacion.sql](../validation/sql/fase3_simulacion.sql) sobre ambos ensayos.
@@ -72,7 +70,7 @@ Resultado de [fase3_simulacion.sql](../validation/sql/fase3_simulacion.sql) sobr
 
 El modelo puntuó los 204 casos. Las 23 entradas en la cola fueron autoaprobaciones de tickets abiertos al menos cuatro horas. La comparación por importe seleccionó 13 casos sembrados y cubrió otros patrones. Estos resultados corresponden a casos sembrados en el ensayo.
 
-La demo quedó en 37 archivos y 668,743 tickets admitidos, con cero duplicados y cero registros en cuarentena. `phase3` permaneció en 115 archivos, 2,142,846 tickets y fecha de corte del 20 de agosto. Pasaron las 15 pruebas locales y las 29 consultas de widgets de `phase3` y 43 de `demo`. La página Simulación vive en el dashboard de demo y usa las etiquetas de `sim_tickets_sembrados`, la bitácora y el score existente.
+La demo quedó en 37 archivos y 668,743 tickets admitidos, con cero duplicados y cero registros en cuarentena. `phase3` permaneció en 115 archivos, 2,142,846 tickets y fecha de corte del 20 de agosto. Pasaron las pruebas locales y todas las consultas de los widgets. La página Simulación vive en el dashboard de demo y usa las etiquetas de `sim_tickets_sembrados`, la bitácora y el score existente.
 
 Las dos corridas completas tardaron más de cuatro minutos. Consulta los [resultados con la v2](modelo_v2.md) para preparar el pitch con el dashboard vigente.
 
@@ -80,9 +78,9 @@ Las dos corridas completas tardaron más de cuatro minutos. Consulta los [result
 
 1. Si quieren mostrar el job en marcha, lanzar `applebees_simulacion` antes del pitch desde *Jobs & Pipelines → Run now* y dejar el día del 22 de agosto seleccionado para la parte de resultados.
 2. **Mostrar el job corriendo** (vista de tareas): *"Acaba de llegar el archivo del siguiente día. Auto Loader procesa el archivo nuevo y la compuerta revisa calidad antes de publicar la cola."*
-3. **Dashboard → Descuentos:** filtrar *Datos = Simulado*. *"Los días simulados tienen un volumen y una tasa parecidos a los reales; la tasa sube un poco por los descuentos sembrados."* (Confirmarlo con los números del ensayo.)
+3. **Dashboard → Descuentos:** filtrar *Datos = Simulado*. *"Los días simulados tienen un volumen y una tasa parecidos a los reales; la tasa sube un poco por los descuentos sembrados."* En el ensayo: 3.64 % y 3.39 % los dos primeros días simulados, contra 3.0–4.5 % de los últimos días reales.
 4. **Dashboard → Cola de revisión:** elegir el último día. Abrir un ticket con motivos *"Autoaprobación registrada + Abierto al menos 4 h"*. *"Este es uno de los tickets que sembramos. El modelo lo puso en la cola y explica por qué."* Señalar el contador **Fuera del top 20 por monto**: *"Estos casos no los vería alguien que solo ordena por monto."*
-5. **Dashboard → Simulación:** *"De N tickets sembrados, X % entró a la cola. El patrón sutil casi no entra, y es lo esperado: un descuento de 20 % con tarjeta no se distingue de una promoción."*
+5. **Dashboard → Simulación:** *"En siete días, la cola encontró 45 de 56 empleado-días sembrados (80 %); ordenar por monto encontró 24. El patrón sutil casi no entra, y es lo esperado: un descuento de 20 % con tarjeta se parece a una promoción."*
 
 Si la corrida en vivo no termina a tiempo, se muestra el día simulado anterior; ya está procesado desde el ensayo.
 

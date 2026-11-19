@@ -1,47 +1,41 @@
-# Contrato de datos y decisiones de calidad
+# Calidad de datos
 
-## Admisión y conservación
+## Entrada a bronze
 
-`bronze_checks` conserva `_raw_record` (objeto JSON), `_source_file`, `_record_index`, `_ingested_at`, fecha y marca. Un archivo vacío o inválido produce un diagnóstico recuperable. La interpretación por ticket detecta campos adicionales incluso en arrays anidados, tipos incompatibles, llaves ausentes, importes esenciales nulos y discordancia entre `BusinessDate` y la fecha del path. `_rescued_data` guarda el motivo, no un fragmento truncado que sustituya al original.
+`bronze_checks` guarda cada ticket con su JSON original (`_raw_record`), archivo de origen, posición en el archivo y hora de ingesta. Si un ticket viene mal, `_rescued_data` dice por qué: archivo vacío o JSON inválido, tipo incorrecto, campos no contemplados (en cualquier nivel), llave incompleta, importes nulos o `BusinessDate` distinta a la fecha de la carpeta.
 
-La vista `valid_checks` es la entrada común de los tickets y sus detalles a Silver. `_rescued_data` identifica errores críticos que conservan la fila en Bronze y bloquean la publicación de alertas. `_dq_warnings` enumera incidentes recuperables. Campos nuevos, ítems sin ID con precios válidos y propinas ausentes siguen a Silver. Las columnas tipadas y el JSON original conservan la evidencia.
+Hay dos niveles. Los **errores críticos** (`_rescued_data`) dejan el registro en Bronze y bloquean la publicación de alertas. Las **advertencias** (`_dq_warnings`: campo nuevo, artículo sin ID con precio válido, propina ausente) dejan pasar el ticket a silver y lo marcan. Tickets y detalles entran por la misma vista `valid_checks`, así que siempre salen del mismo conjunto. Como el JSON original se conserva, un campo nuevo se puede revisar e incorporar sin perder datos.
 
-Los arrays de actividad nulos o vacíos representan ausencia de movimientos, como en la fuente original. Un elemento presente con importe esencial nulo es inválido. Una propina ausente se conserva como dato desconocido. La validación no implica que todo string opcional tenga significado de negocio: horarios, empleados desconocidos y signos se controlan además en silver/gold.
+## Controles que bloquean las alertas
 
-## Controles críticos
-
-| Dimensión | Implementación | Acción |
-|---|---|---|
-| Estructura/tipos | Parser con esquema explícito y columna de corrupción | Cuarentena para registros ilegibles o tipos incompatibles; conserva JSON y motivo |
-| Campos nuevos | Detección recursiva en objetos y arrays | Admitir valores tipados y mostrar advertencia |
-| ID de artículo o propina ausente | Columna nula y diagnóstico explícito | Conservar venta, descuento y otros importes válidos; medir cobertura de conciliación |
-| Completitud | Conteos de tickets, items, descuentos, pagos y voids válidos esperados desde bronze contra silver | Bloquear si difieren |
-| Unicidad | Llave `LocationId + dt + CheckId` | Bloquear duplicados; no elegir arbitrariamente una copia |
-| Referencias | Ticket debe enlazar tienda y canal; score debe enlazar un empleado positivo | Bloquear referencias perdidas |
-| Catálogos | IDs obligatorios y ausencia de atributos contradictorios por ID | Bloquear contradicciones; duplicados idénticos se consolidan |
-| Consistencia monetaria | `paid = sold - disc_check + tax + tip`, tolerancia $0.05 | Conciliación ≥95% global y en cada día con tickets evaluables; mostrar cobertura por separado |
-| Porcentajes | `pct_desc` gold entre 0 y 1, o nulo cuando venta bruta es cero; igualdad con el cociente de sus totales a nueve decimales | Bloquear resultados fuera del contrato |
-| Métricas | Exactamente una fila de calidad, contadores enteros no negativos, ratios finitos | Bloquear nulos, ausencias, infinitos y cardinalidad incorrecta |
-
-La compuerta valida publicación para alertas; no proporciona una transacción atómica de todas las tablas del pipeline. Un consumidor debe comprobar el éxito de la corrida completa. El 95% es un umbral inicial explícito, no una garantía de exactitud de cada ticket; se reportan también los errores absolutos y el peor día.
-
-## Excepciones conservadas y monitorizadas
-
-| Caso | Tratamiento y motivo |
+| Dimensión | Cómo se revisa |
 |---|---|
-| Ticket sin items | Conservar; puede representar una cancelación o actividad sin venta. Contar `tickets_sin_items`. |
-| Importe negativo en pagos | Conservar y desglosar por `PayCatName`. Puede ser reverso o venta de gift card; confirmar semántica con negocio. |
-| Propina con signo invertido | Conservar `Tip=-Gratuity` y advertir. No recortar a cero ni alterar conciliación. |
-| Bruto negativo, descuentos negativos o mayores al bruto | Conservar y cuantificar. Revisión de operaciones; no ocultar al calcular el riesgo. |
-| Horario ausente/negativo | Advertir y contar. Duración nula no activa la regla de cuatro horas. |
-| EmployeeId nulo, cero o fuera del catálogo | Mantener movimiento monetario y contarlo; excluir identidad del score. |
-| ManagerId nulo o no positivo | `sin_gerente=true`. Autoaprobación solo cuando ambos IDs son positivos e iguales. |
-| Modificadores a $0 | Conservar; `es_modificador=true`. El denominador de elegibilidad usa líneas con precio positivo. |
+| Estructura y tipos | Esquema explícito; registros ilegibles o con tipos incompatibles van a cuarentena |
+| Campos nuevos, artículo sin ID, propina ausente | Advertencia: el ticket entra y se cuenta |
+| Completitud | Mismo número de tickets, items, descuentos, pagos y voids entre bronze y silver |
+| Unicidad | Llave `LocationId + dt + CheckId` sin duplicados |
+| Referencias | Todo ticket tiene tienda y canal; todo empleado del score existe en el catálogo |
+| Catálogos | Sin IDs nulos ni atributos contradictorios por ID |
+| Conciliación | `paid = sold − disc_check + tax + tip` (±$0.05) en ≥ 95 % de los tickets con propina conocida, global y en cada día; la cobertura se reporta aparte |
+| Porcentajes | `pct_desc` entre 0 y 1 y consistente con sus totales |
 
-## Política monetaria y límites del score
+## Excepciones que se conservan
 
-Silver convierte cada importe a `DECIMAL(18,2)` antes de agregar. Spark redondea al centavo al convertir; los datos de referencia usan importes de dos decimales. La tasa de KPIs convierte los totales a DECIMAL(24,2) antes de dividir y el resultado a DECIMAL(18,9), para conservar la misma precisión en refrescos completos e incrementales. Las tasas usan división segura y no se recortan a [0,1] para ocultar errores. La conciliación usa una tolerancia de cinco centavos independiente del redondeo visual.
+| Caso | Tratamiento |
+|---|---|
+| Ticket sin items | Se conserva (posible cancelación) y se cuenta |
+| Pago negativo | Se conserva y se desglosa por `PayCatName` (reversos, venta de gift card) |
+| Propina con signo invertido | Se conserva `Tip = −Gratuity` y se advierte |
+| Bruto negativo o descuento mayor al bruto | Se conserva y se cuantifica para revisión |
+| Horario ausente o negativo | Se cuenta; no activa la regla de 4 horas |
+| Empleado nulo, 0 o fuera del catálogo | Se conserva el monto; queda fuera del score |
+| `ManagerId` nulo o ≤ 0 | `sin_gerente = true`; autoaprobación solo con IDs positivos iguales |
+| Líneas a $0 | Son modificadores (`es_modificador = true`); no cuentan para el mínimo de 100 líneas |
 
-El score 0–7 evalúa pares empleado–tienda identificados con ≥100 líneas de precio positivo. Su venta son las líneas registradas por ese empleado; sus descuentos son los que aplicó, incluso a tickets vendidos por otra persona. Por tanto, esa atribución es una señal operativa y no una cuenta de rentabilidad individual. La mediana se calcula entre empleados elegibles de la misma tienda. Si es cero, el ratio queda nulo y la regla comparativa no suma puntos.
+## Importes y score
 
-Los umbrales son iniciales. La señal de efectivo puede ser frecuente en toda la cadena; calibrar contra una muestra revisada antes de tratar el score como clasificación de abuso. Preservar distinción entre conteo de IDs, pares empleado–tienda y movimientos de descuento. No extrapolar descuentos asociados al score a dinero recuperable.
+Silver convierte cada importe a `DECIMAL(18,2)` antes de sumar, para evitar errores de redondeo de `double`. Las tasas de KPIs se calculan con DECIMAL(24,2) y se guardan como DECIMAL(18,9), así dan lo mismo en un refresco completo o incremental.
+
+El score evalúa pares empleado–tienda con al menos 100 líneas con precio. La venta son las líneas que registró el empleado y el descuento lo que él aplicó, aunque sea en tickets de otra persona. La mediana se calcula entre los empleados elegibles de la misma tienda; si es cero, esa regla no suma puntos.
+
+Los umbrales son iniciales. La regla de efectivo se activa en la mitad de los empleados porque el efectivo concentra el descuento en toda la cadena, así que es la primera que conviene calibrar con prevención de pérdidas (por ejemplo, comparar contra el % de efectivo de su propia tienda).
