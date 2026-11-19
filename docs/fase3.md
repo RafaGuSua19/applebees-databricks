@@ -41,7 +41,7 @@ La base usa movimientos positivos y habilita revisiones con evidencia directa au
 ## Primera ejecución en Databricks
 
 - [Corrida histórica, 18 de noviembre](https://dbc-eb170ead-6845.cloud.databricks.com/jobs/1077728338396415/runs/700306622758077?o=7474659154935244). Ingesta, compuerta, resumen histórico y publicación del score en éxito. El destino es el esquema personal de `phase3` en el catálogo `workspace`; se procesaron 115 archivos con 2,142,846 tickets admitidos.
-- [Dashboard publicado](https://dbc-eb170ead-6845.cloud.databricks.com/dashboardsv3/01f1e3bc8da91e4d95ee22717db572ee/published?w=7474659154935244). Usa el warehouse del reto con credenciales de quien consulta.
+- [Dashboard publicado](https://dbc-eb170ead-6845.cloud.databricks.com/dashboardsv3/01f1e3bc8da91e4d95ee22717db572ee/published?w=7474659154935244). Usa el warehouse del reto con los permisos de datos de quien lo publica.
 - El score publicó **268,580 tickets elegibles** para el histórico. En los 21 días evaluados (31 de julio al 20 de agosto), hubo 46,387 candidatos. Usaron referencia local 40,686, referencia de cadena 5,347 y 354 quedaron con historial insuficiente. Cobertura de referencia, **99.24%**.
 - Con el mismo presupuesto de 420 casos por lista, los dos rankings coincidieron en **49**. La cola asignó **371** plazas a tickets distintos de los seleccionados por importe. Dentro de la cola, 413 recibieron puntos por una tasa inusual. El piloto debe medir qué casos fueron accionables.
 
@@ -67,7 +67,7 @@ Referencias de plataforma. [Auto Loader y archivos inmutables](https://docs.data
 2. **Cola de revisión.** Elegir un día y leer el motivo de un caso, su tasa y la referencia. La posición es global por fecha. Filtrar una tienda muestra sus tickets dentro de ese top global. Comparar la posición por score con la posición por monto para explicar la prioridad.
 3. **Calidad y frescura.** Revisar el último día del pipeline, el último día con candidatos, la hora de publicación, propinas no observables y los conteos de advertencias y cuarentena. El dashboard omite JSON original, nombres e IDs de empleados.
 
-El dashboard nativo usa las credenciales de quien lo abre. Los datos de origen y el detalle de Bronze quedan en el workspace. La página de incidencias consulta un agregado de Gold que conserva fecha, archivo, tipo, motivo y conteo. Los permisos de los jueces se deben acordar antes de compartir.
+El recurso `revision_descuentos` de `phase3` configura `embed_credentials: true`. El dashboard publicado ejecuta consultas con los permisos de datos de quien lo publica. La página de incidencias consulta un agregado de Gold con fecha, archivo, tipo, motivo y conteo. Cada espectador necesita acceso al dashboard.
 
 ## Alcance de la presentación final
 

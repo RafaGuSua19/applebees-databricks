@@ -52,4 +52,4 @@ targets:
           warehouse_id: ${var.dashboard_warehouse_id}
           dataset_catalog: ${var.catalog}
           dataset_schema: ${var.schema}
-          embed_credentials: false
+          embed_credentials: true
