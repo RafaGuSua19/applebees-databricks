@@ -62,22 +62,27 @@ def parse_archivos(archivos):
               .withColumn("brand", F.regexp_extract("_source_file", r"brand=([^/]+)", 1))
               .withColumn("dt", F.expr("try_cast(regexp_extract(_source_file, 'dt=([0-9]{4}-[0-9]{2}-[0-9]{2})', 1) AS DATE)")))
     invalid_values = """
-      coalesce(exists(ItemsSold, i -> i IS NULL OR i.ItemId IS NULL OR
-        i.GrossPrice IS NULL OR i.SoldPrice IS NULL OR isnan(i.GrossPrice) OR isnan(i.SoldPrice)), false)
-      OR coalesce(exists(Discounts, d -> d IS NULL OR d.Amount IS NULL OR isnan(d.Amount)), false)
-      OR coalesce(exists(ItemsSold, i -> exists(i.Discounts, d -> d IS NULL OR d.Amount IS NULL OR isnan(d.Amount))), false)
-      OR coalesce(exists(Payments, p -> p IS NULL OR p.Amount IS NULL OR p.Gratuity IS NULL OR isnan(p.Amount) OR isnan(p.Gratuity)), false)
-      OR coalesce(exists(Tax, t -> t IS NULL OR t.Amount IS NULL OR isnan(t.Amount)), false)
-      OR coalesce(exists(Voids, v -> v IS NULL OR v.Amount IS NULL OR isnan(v.Amount)), false)
+      coalesce(exists(ItemsSold, i -> try_cast(i.GrossPrice AS DECIMAL(18,2)) IS NULL OR
+                                     try_cast(i.SoldPrice AS DECIMAL(18,2)) IS NULL), false)
+      OR coalesce(exists(Discounts, d -> try_cast(d.Amount AS DECIMAL(18,2)) IS NULL), false)
+      OR coalesce(exists(ItemsSold, i -> exists(i.Discounts, d -> try_cast(d.Amount AS DECIMAL(18,2)) IS NULL)), false)
+      OR coalesce(exists(Payments, p -> try_cast(p.Amount AS DECIMAL(18,2)) IS NULL
+        OR (p.Gratuity IS NOT NULL AND try_cast(p.Gratuity AS DECIMAL(18,2)) IS NULL)), false)
+      OR coalesce(exists(Tax, t -> try_cast(t.Amount AS DECIMAL(18,2)) IS NULL), false)
+      OR coalesce(exists(Voids, v -> try_cast(v.Amount AS DECIMAL(18,2)) IS NULL), false)
     """
     return (parsed.withColumn("_rescued_data",
                 F.when(F.col("_record_index").isNull(), F.lit("archivo_vacio_o_json_invalido"))
                  .when(F.col("_corrupt_record").isNotNull() | F.json_object_keys("_raw_record").isNull(), F.lit("tipo_o_json_invalido"))
-                 .when(F.col("_unknown_fields"), F.lit("campos_no_contemplados"))
                  .when(F.col("Id").isNull() | F.col("LocationId").isNull() | F.col("dt").isNull(), F.lit("llave_incompleta"))
                  .when(F.expr(invalid_values), F.lit("importe_o_detalle_incompleto"))
                  .when(F.expr("try_cast(substr(BusinessDate, 1, 10) AS DATE)").isNull()
                        | (F.expr("try_cast(substr(BusinessDate, 1, 10) AS DATE)") != F.col("dt")), F.lit("fecha_negocio_inconsistente")))
+            .withColumn("_dq_warnings", F.expr("""filter(array(
+                IF(_unknown_fields, 'campos_no_contemplados', NULL),
+                IF(exists(ItemsSold, i -> i IS NOT NULL AND i.ItemId IS NULL), 'item_sin_id', NULL),
+                IF(exists(Payments, p -> p IS NOT NULL AND p.Gratuity IS NULL), 'propina_desconocida', NULL)
+            ), motivo -> motivo IS NOT NULL)"""))
             .drop("_corrupt_record", "_unknown_fields")
             .withColumn("_ingested_at", F.current_timestamp()))
 
@@ -88,6 +93,7 @@ def parse_archivos(archivos):
     cluster_by=["dt", "LocationId"], table_properties={"quality": "bronze"},
 )
 @dlt.expect("sin_datos_rescatados", "_rescued_data IS NULL")
+@dlt.expect("sin_advertencias", "size(_dq_warnings) = 0")
 @dlt.expect("con_fecha_de_negocio", "dt IS NOT NULL")
 def bronze_checks():
     source = spark.conf.get("source_path", "/Volumes/workspace/default/applebees")

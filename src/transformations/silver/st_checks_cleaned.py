@@ -21,7 +21,7 @@ def _existe(cond):
 )
 @dlt.expect_or_drop("llave_completa", "LocationId IS NOT NULL AND dt IS NOT NULL AND CheckId IS NOT NULL")
 @dlt.expect("venta_bruta_no_negativa", "gross >= 0")
-@dlt.expect("conciliacion_cuadra", "abs(paid - (sold - disc_check + tax + tip)) <= 0.05")
+@dlt.expect("conciliacion_cuadra", "tip IS NOT NULL AND abs(paid - (sold - disc_check + tax + tip)) <= 0.05")
 @dlt.expect("horario_valido", "min_abierto IS NOT NULL AND min_abierto >= 0")
 def silver_checks():
     return build_checks(spark.readStream.table("valid_checks"))
@@ -66,10 +66,10 @@ def build_checks(source):
             F.greatest(F.coalesce(F.size("Voids"), F.lit(0)), F.lit(0)).alias("n_voids"),
             _suma("Tax", "Amount").alias("tax"),
             _suma("Payments", "Amount").alias("paid"),
-            (-_suma("Payments", "Gratuity")).alias("tip"),      # Gratuity viene negativa por diseño
+            F.when(~_existe("p.Gratuity IS NULL"), -_suma("Payments", "Gratuity")).alias("tip"),
             tipo_pago.alias("tipo_pago"),
             minutos.alias("min_abierto"),
-            "_source_file",
+            "_source_file", "_dq_warnings",
         )
         .withColumn("descuento", F.col("disc_item") + F.col("disc_check"))
         .withColumn("venta_neta", F.col("sold") - F.col("disc_check"))

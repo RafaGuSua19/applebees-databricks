@@ -12,6 +12,10 @@ Pipeline de **Sun Holdings × Databricks Data Challenge** que transforma tickets
 - [Columnas y reglas de la capa Gold](docs/diccionario_datos.md)
 - [Archivos de entrega y push a main](docs/entrega.md)
 
+## Fase 3 · Idea Submission
+
+[Decisiones, implementación y evidencia de Fase 3](docs/fase3.md) · [Guion de presentación](docs/fase3_guion.md)
+
 ## Arquitectura
 
 ```mermaid
@@ -27,9 +31,11 @@ flowchart LR
   C & L & SD & G --> Q
   Q --> J{Compuerta de calidad}
   J -->|aprobada| R[Resumen de riesgo en el job]
+  J -->|aprobada| M[Score contextual por ticket y cola]
+  M --> AIBI[Dashboard AI/BI]
 ```
 
-El job ejecuta **pipeline → compuerta de calidad → resumen de riesgo**. Las dependencias impiden emitir alertas cuando falla una tarea previa. El pipeline es triggered, con ejecución manual o programación diaria a las 06:00 `America/Chicago`, pausada en desarrollo. Hay una sola corrida concurrente y reintentos para errores transitorios.
+El job ejecuta **pipeline → compuerta de calidad → resumen de riesgo y publicación de la cola**. Las dependencias impiden emitir alertas cuando falla una tarea previa. El pipeline es triggered, con ejecución manual o programación diaria a las 06:00 `America/Chicago`, pausada en desarrollo. Hay una sola corrida concurrente y reintentos para errores transitorios.
 
 ## Organización
 
@@ -83,6 +89,7 @@ Los parámetros `catalog`, `schema`, `source_path` y `failure_emails` permiten c
 | `gold_kpis_diarios` | Día × tienda × canal × pago | Tendencias, comparaciones y futura visualización |
 | `gold_riesgo_empleados` | Empleado × tienda; reglas contra su mediana local | Priorizar revisión de expedientes |
 | `gold_riesgo_tiendas` | Agregados y conteo de empleados en riesgo por tienda | Dirigir capacidad de revisión de operaciones |
+| `gold_revision_descuentos` | Contexto de 28 días, señales explicadas y ranking por importe | Cola operativa de revisión y benchmark |
 | `gold_calidad_datos` | Completitud, unicidad, referencias, conciliación y excepciones | Decidir si se pueden emitir alertas |
 
 **Reglas contables:** `GrossPrice` ya incluye la cantidad; no se vuelve a multiplicar. `disc_item` ya está restado en `sold`; `disc_check` se resta después. Por tanto, `descuento = disc_item + disc_check`, `venta_neta = sold - disc_check` y `paid = venta_neta + tax + tip`. `tip = -Gratuity`, conservando anomalías de signo. `PayCatName`, normalizado, identifica efectivo; `IsCashDebit` no lo identifica correctamente.
@@ -105,7 +112,7 @@ Población: pares **empleado–tienda**, con ID positivo presente en el catálog
 ## Calidad y prácticas de ingeniería
 
 - **Ingesta incremental:** Auto Loader y checkpoints procesan archivos nuevos e inmutables. Una segunda corrida sin nuevas entradas debe conservar conteos e importes. Cambios de lógica histórica requieren full refresh.
-- **Cuarentena recuperable:** los tickets con errores conservan JSON y motivo en bronze. Tickets y detalles comparten la misma admisión a silver. La compuerta bloquea cualquier registro rescatado.
+- **Cuarentena recuperable:** los tickets con errores conservan JSON y motivo en bronze. Tickets y detalles comparten la admisión a Silver. Campos nuevos, ID de ítem ausente y propina desconocida generan advertencias. La compuerta bloquea la publicación de alertas ante un registro en cuarentena.
 - **Completitud y exactitud:** comparación de conteos entre capas, llaves únicas, referencias válidas y conciliación ≥95% tanto global como por día. Montos `DECIMAL(18,2)` y tolerancia contable de $0.05.
 - **Expectations:** errores y advertencias visibles por tabla. Anomalías comerciales se conservan y cuentan; no se eliminan para mejorar indicadores.
 - **Materialized views:** catálogos y gold se actualizan según dependencias; Databricks elige actualización incremental o recálculo completo. No se promete incrementalidad para todos los planes.

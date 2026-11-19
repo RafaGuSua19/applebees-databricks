@@ -45,8 +45,11 @@ def case(name, mutate, expected):
     mutate(obj)
     cases.append((name, json.dumps([obj]), expected))
 
-case("extra_root", lambda x: x.update(UnexpectedField=7), "campos_no_contemplados")
-case("extra_nested", lambda x: x["ItemsSold"][0]["Discounts"][0].update(UnexpectedField=7), "campos_no_contemplados")
+case("extra_root", lambda x: x.update(UnexpectedField=7), None)
+case("extra_nested", lambda x: x["ItemsSold"][0]["Discounts"][0].update(UnexpectedField=7), None)
+case("item_sin_id", lambda x: x["ItemsSold"][0].pop("ItemId"), None)
+case("propina_desconocida", lambda x: x["Payments"][0].pop("Gratuity"), None)
+case("extra_y_llave_invalida", lambda x: x.update(UnexpectedField=7, Id=None), "llave_incompleta")
 case("bad_id", lambda x: x.update(Id="invalid"), "tipo_o_json_invalido")
 case("bad_money", lambda x: x["ItemsSold"][0].update(GrossPrice="invalid"), "tipo_o_json_invalido")
 case("null_money", lambda x: x["ItemsSold"][0].update(SoldPrice=None), "importe_o_detalle_incompleto")
@@ -68,7 +71,19 @@ for name, raw, expected in cases:
     assert actual[name] == expected, (name, actual[name], expected)
 print(f"PASS: {len(cases)} casos del parser (incluye campos anidados, tipos, nulos y archivo vacío)")
 
-valid = parsed.filter("_rescued_data IS NULL")
+warnings = {"extra_root": "campos_no_contemplados", "extra_nested": "campos_no_contemplados",
+            "item_sin_id": "item_sin_id", "propina_desconocida": "propina_desconocida"}
+admitted = checks_code["build_checks"](parsed.filter("_rescued_data IS NULL"))
+warning_rows = {r._source_file.split("/")[2]: r for r in admitted.collect()}
+assert set(warning_rows) == {"valid", *warnings}
+for name, warning in warnings.items():
+    recovered = warning_rows[name]
+    assert recovered._dq_warnings == [warning]
+    assert str(recovered.gross) == "10.10" and str(recovered.descuento) == "3.00"
+assert warning_rows["propina_desconocida"].tip is None
+assert str(warning_rows["propina_desconocida"].paid) == "8.10"
+
+valid = parsed.filter("_rescued_data IS NULL AND size(_dq_warnings) = 0")
 checks = checks_code["build_checks"](valid)
 row = checks.collect()[0]
 assert str(row.gross) == "10.10" and str(row.descuento) == "3.00", row
@@ -100,6 +115,36 @@ scored = risk["build_risk"](items, discounts, checks, employees).collect()
 assert len(scored) == 1 and scored[0].EmployeeId == 11
 assert scored[0].score_riesgo == 3, scored
 print("PASS: ID cero y empleado fuera del catálogo excluidos; score esperado")
+
+# Simula un día nuevo y reejecuta el mismo lote. La ventana deja fuera el presente y el futuro.
+from datetime import date, timedelta
+
+sample_day = date(2026, 8, 20)
+first_day = sample_day - timedelta(days=7)
+history = [(first_day + timedelta(days=day), store, 1000 + idx, 2, "Efectivo", 100.0, 10.0, [], 30.0)
+           for day in range(7) for store in (7, 8, 9, 10) for idx in range(8)]
+new = [(sample_day, 7, 1, 2, "Efectivo", 100.0, 40.0, ["item_sin_id"], 245.0),
+       (sample_day, 7, 2, 2, "Efectivo", 2000.0, 190.0, [], 35.0),
+       (sample_day, 6, 3, 2, "Efectivo", 100.0, 10.0, [], 20.0),
+       (sample_day, 6, 4, 2, "Otro", 100.0, 60.0, [], None)]
+cols = ("dt date, LocationId long, CheckId long, CheckRevenueCenterId long, tipo_pago string, "
+        "gross double, descuento double, _dq_warnings array<string>, min_abierto double")
+spark.createDataFrame([(sample_day, 7, 1, True, False, "MANAGER", 40.0)],
+                      "dt date, LocationId long, CheckId long, autoaprobado boolean, sin_gerente boolean, "
+                      "DiscountName string, Amount double").createOrReplaceTempView("fixture_silver_discounts")
+query = (ROOT / "src/jobs/modelo_revision.sql").read_text().replace("{{schema}}.", "fixture_")
+spark.createDataFrame(history, cols).createOrReplaceTempView("fixture_silver_checks")
+assert spark.sql(query).count() == len(history)
+spark.createDataFrame(history + new, cols).createOrReplaceTempView("fixture_silver_checks")
+as_of = spark.sql(query).filter(F.col("dt") == F.lit(sample_day)).drop("publicado_en").orderBy("prioridad_dia")
+ranked = as_of.collect()
+assert [(r.CheckId, r.score) for r in ranked] == [(1, 6), (2, 0), (4, 0), (3, 0)], ranked
+assert ranked[0].prioridad_por_monto == 3 and ranked[0].con_advertencia
+assert ranked[0].tickets_referencia == 56 and abs(ranked[0].tasa_referencia - 0.1) < 1e-9
+assert ranked[2].grupo_referencia == "Historial insuficiente" and ranked[2].tasa_referencia is None
+assert ranked[3].tickets_referencia == 224 and ranked[3].grupo_referencia == "Cadena, canal y pago"
+assert ranked == as_of.collect(), "El ranking debe coincidir al repetir el cálculo"
+print("PASS: día nuevo, comparación temporal, respaldo de cadena, historial escaso, señales y ranking reproducible")
 
 # El dataset completo debe haberse publicado antes de esta prueba.
 dbutils.widgets.text("validate_dataset", "true")

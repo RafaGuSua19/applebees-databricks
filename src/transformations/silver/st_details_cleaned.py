@@ -17,7 +17,7 @@ def _checks():
 
 @dlt.table(name="silver_items", comment="Una fila por línea de item. es_modificador = línea a $0 (salsas, cubiertos).",
            cluster_by=["dt", "LocationId"], table_properties={"quality": "silver"})
-@dlt.expect_or_drop("item_con_id", "ItemId IS NOT NULL")
+@dlt.expect("item_con_id", "ItemId IS NOT NULL")
 @dlt.expect("precio_no_negativo", "GrossPrice >= 0")
 def silver_items():
     return (_checks().select(*KEYS, F.explode("ItemsSold").alias("i"))
