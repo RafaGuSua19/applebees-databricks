@@ -129,9 +129,10 @@ new = [(sample_day, 7, 1, 2, "Efectivo", 100.0, 40.0, ["item_sin_id"], 245.0),
        (sample_day, 6, 4, 2, "Otro", 100.0, 60.0, [], None)]
 cols = ("dt date, LocationId long, CheckId long, CheckRevenueCenterId long, tipo_pago string, "
         "gross double, descuento double, _dq_warnings array<string>, min_abierto double")
-spark.createDataFrame([(sample_day, 7, 1, True, False, "MANAGER", 40.0)],
-                      "dt date, LocationId long, CheckId long, autoaprobado boolean, sin_gerente boolean, "
-                      "DiscountName string, Amount double").createOrReplaceTempView("fixture_silver_discounts")
+discount_cols = ("dt date, LocationId long, CheckId long, EmployeeId long, autoaprobado boolean, "
+                 "sin_gerente boolean, DiscountName string, Amount double")
+discount_events = [(sample_day, 7, 1, 11, True, False, "MANAGER", 40.0)]
+spark.createDataFrame(discount_events, discount_cols).createOrReplaceTempView("fixture_silver_discounts")
 query = (ROOT / "src/jobs/modelo_revision.sql").read_text().replace("{{schema}}.", "fixture_")
 spark.createDataFrame(history, cols).createOrReplaceTempView("fixture_silver_checks")
 assert spark.sql(query).count() == len(history)
@@ -145,6 +146,23 @@ assert ranked[2].grupo_referencia == "Historial insuficiente" and ranked[2].tasa
 assert ranked[3].tickets_referencia == 224 and ranked[3].grupo_referencia == "Cadena, canal y pago"
 assert ranked == as_of.collect(), "El ranking debe coincidir al repetir el cálculo"
 print("PASS: día nuevo, comparación temporal, respaldo de cadena, historial escaso, señales y ranking reproducible")
+
+# Tres tickets del mismo empleado compiten por dos plazas, aunque la cola tenga espacio.
+cap_tickets = [(sample_day, 7, i, 2, "Efectivo", 100.0, 40.0, [], 30.0) for i in (10, 11, 12)]
+discount_events += [(sample_day, 7, i, 21, False, False, "MANAGER", 40.0) for i in (10, 11, 12)]
+discount_events += [(sample_day - timedelta(days=6), 7, i, 21, False, False, "MANAGER", 10.0)
+                    for i in range(100, 109)]
+for day, n in [(7, 2), (34, 2), (35, 1), (-1, 1)]:
+    discount_events += [(sample_day - timedelta(days=day), 7, 200 + i, 21, False, False, "WALKOUT", 10.0)
+                        for i in range(n)]
+spark.createDataFrame(history + new + cap_tickets, cols).createOrReplaceTempView("fixture_silver_checks")
+spark.createDataFrame(discount_events, discount_cols).createOrReplaceTempView("fixture_silver_discounts")
+limited = spark.sql(query).filter("empleado_discrecional = 21").orderBy("CheckId").collect()
+assert [(r.descuentos_7d, float(r.base_semanal), r.puntos_empleado) for r in limited] == [(12, 1.0, 3)] * 3
+assert [r.orden_empleado for r in limited] == [1, 2, 3]
+assert limited[0].prioridad_dia is not None and limited[1].prioridad_dia is not None
+assert limited[2].prioridad_dia is None and limited[2].prioridad_por_monto is not None
+print("PASS: ventanas de conducta y tope estricto de dos tickets, con ranking por importe intacto")
 
 # El dataset completo debe haberse publicado antes de esta prueba.
 dbutils.widgets.text("validate_dataset", "true")

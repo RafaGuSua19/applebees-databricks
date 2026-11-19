@@ -1,114 +1,108 @@
 # Fase 3 · Revisión diaria de descuentos
 
-**Pregunta de negocio.** ¿Qué tickets con descuento debe revisar primero Operaciones cada día, dada una capacidad inicial de 20 revisiones, y qué evidencia explica su prioridad?
+**Pregunta de negocio:** ¿qué tickets con descuento debe revisar primero Operaciones cada día, con capacidad para 20 revisiones, y qué evidencia explica su prioridad?
 
-El entregable de esta fase es la propuesta y su alcance para la final. El prototipo toma el pipeline de Fase 2, agrega un modelo por ticket y presenta la evidencia en un dashboard de Databricks. Las cifras históricas y los resultados de un futuro piloto tienen significados distintos. El monto asociado a un ticket es el descuento registrado. Una revisión puede concluir que el caso es legítimo, requiere una acción o tiene evidencia insuficiente.
+Partimos del pipeline de Fase 2, agregamos un modelo que puntúa cada ticket y mostramos la evidencia en un dashboard de Databricks. El monto de un ticket en la cola es el descuento registrado; la revisión decide si el caso es legítimo, requiere acción o no tiene evidencia suficiente.
 
-## Evidencia de partida
+## De dónde partimos
 
-La [validación de Fase 2](validacion.md) documenta 2,142,846 tickets de 127 tiendas, 28 de abril a 20 de agosto de 2026. Registró $3.02 M en descuentos sobre $87.32 M en venta bruta (3.46%).
+La [validación de Fase 2](validacion.md) cubre 2,142,846 tickets de 127 tiendas (28 abr – 20 ago 2026): $3.02 M de descuento sobre $87.32 M de venta bruta (3.46 %).
 
-| Hallazgo | Denominador y decisión |
+| Hallazgo | Qué hacemos con él |
 |---|---|
-| Efectivo concentra 55.2% del descuento y 17.5% de la venta bruta | Participación del efectivo en cada total. Revisar el circuito de autorización en los casos señalados. |
-| Tickets abiertos ≥4 h tienen tasa de 21.24%, frente a 3.25% para el resto | Descuento / venta bruta dentro de cada grupo. Revisar cierre y momento de autorización. |
-| To Go tiene tasa de 12.18%, frente a 3.76% en In-Store | Descuento / venta bruta por canal. Incorporar el canal al grupo de referencia. |
-| 34 pares de empleado y tienda aparecen en el nivel alto del score anterior, de 2,959 elegibles | Regla histórica por empleado y tienda. La cola nueva prioriza tickets individuales. |
-
-La guía de Fase 2 preliminar y el EDA incluyen un universo de 2,960. El informe de validación y la presentación final de Fase 2 registran 2,959 pares elegibles. Usamos el valor validado y las definiciones contables de la entrega.
+| El efectivo concentra 55.2 % del descuento y solo 17.5 % de la venta | La forma de pago define el grupo de comparación de cada ticket |
+| Los tickets abiertos 4 h o más descuentan 21.24 %, contra 3.25 % del resto | La duración suma un punto |
+| To Go descuenta 12.18 %, contra 3.76 % en In-Store | El canal define el grupo de comparación |
+| 34 pares empleado–tienda en riesgo alto (de 2,959) con el score de Fase 2 | La cola baja al nivel de ticket, que es donde actúa un revisor |
 
 ## Cómo funciona el modelo
 
-1. Se puntúa una fila por ticket admitido con bruto y descuento positivos. Su tasa es descuento total entre venta bruta. Las líneas de descuento positivas explican autoaprobación y ausencia de gerente para MANAGER/WALKOUT.
-2. Para cada fecha, se aprende la media y desviación estándar poblacional de las tasas individuales en los **28 días calendario anteriores**. Las tasas de referencia se limitan a 100% al estimar la distribución. El valor original del ticket sigue visible y se usa para su desviación. La desviación estándar tiene un piso de 2 puntos porcentuales para cohortes uniformes.
-3. Se busca una referencia de la misma tienda, canal y forma de pago con ≥50 tickets descontados en ≥7 días con descuentos. Cuando no alcanza, se usa la cadena para el mismo canal y pago con ≥200 tickets en ≥7 días con descuentos. Con historia insuficiente, se muestra el estado y los puntos contextuales quedan en cero.
-4. Se explica cada punto con la evidencia observable. El puntaje toma un valor de 0 a 7 y cada ticket tiene una posición por score y otra por importe.
+1. Se puntúa cada ticket con venta bruta y descuento positivos. Su tasa es descuento ÷ venta bruta.
+2. Para cada fecha se calcula la media y la desviación estándar de las tasas en los **28 días anteriores**, en tickets de la misma tienda, canal y forma de pago (≥ 50 tickets en ≥ 7 días). Si la tienda no alcanza, se usa la cadena con el mismo canal y pago (≥ 200 tickets). Si tampoco, el ticket queda como "historial insuficiente" y la tasa no suma puntos. La desviación tiene un piso de 2 puntos porcentuales.
+3. Se suman los puntos (0 a 10):
 
 | Señal | Puntos |
 |---|---:|
-| Tasa al menos 3 desviaciones arriba de su media y brecha ≥10 puntos porcentuales | 3 |
-| Tasa al menos 2 desviaciones arriba de su media y brecha ≥8 puntos porcentuales | 2 si no aplica la regla anterior |
-| Algún descuento positivo con autoaprobación identificada | 2 |
-| MANAGER o WALKOUT positivo sin gerente identificado | 1 |
-| Duración de al menos cuatro horas | 1 |
+| Tasa ≥ 3 desviaciones arriba de su referencia y ≥ 10 pp de diferencia | 3 |
+| Si no, ≥ 2 desviaciones y ≥ 8 pp | 2 |
+| Autoaprobación (el mismo empleado aplica y autoriza) | 2 |
+| MANAGER o WALKOUT sin gerente | 1 |
+| Ticket abierto 4 h o más | 1 |
+| El empleado lleva muchos MANAGER/WALKOUT esta semana frente a su propia historia (v2) | 3 o 2 |
 
-El desempate ordena por importe de descuento descendente, tienda y ticket. La vista operativa muestra hasta **20 por fecha**, con mínimo **2 puntos**. La advertencia de calidad viaja junto al ticket y aporta cero puntos. Los umbrales son decisiones iniciales de diseño. La operación humana conserva la decisión de abrir y cerrar cada caso.
+4. La cola de cada día toma los **20 tickets con más puntos (mínimo 2)**, con máximo 2 por empleado. Los empates se ordenan por monto. Cada ticket guarda también su posición por monto para comparar.
 
-**Ejemplo simulado usado en la prueba.** Un ticket con $40 de descuento sobre $100 tiene una tasa del 40% frente a una media contextual del 10%. Si registra autoaprobación y dura 245 minutos, suma 6 puntos (3 + 2 + 1). Queda primero por score y tercero por importe en ese lote. El modelo también identifica cuándo usa la referencia de cadena o carece de historial.
+**Ejemplo:** un ticket con $40 de descuento sobre $100 (40 %), en un contexto donde lo normal es 10 %, con autoaprobación y 245 minutos abierto, suma 3 + 2 + 1 = **6 puntos**. Queda primero en la cola aunque por monto sería tercero.
 
-La base usa movimientos positivos y habilita revisiones con evidencia directa aun cuando la cohorte es pequeña. El benchmark de ranking por importe enfrenta la misma población de candidatos y las mismas plazas diarias. El SQL de evaluación compara sus posiciones durante los últimos 21 días disponibles. La comparación mide cobertura y solapamiento entre listas. El valor predictivo se evaluará con resultados de auditoría humana.
+Las reglas de la conducta del empleado y sus resultados están en [modelo_v2.md](modelo_v2.md).
 
-## Primera ejecución en Databricks
+## Resultados
 
-- [Corrida histórica, 18 de noviembre](https://dbc-eb170ead-6845.cloud.databricks.com/jobs/1077728338396415/runs/700306622758077?o=7474659154935244). Ingesta, compuerta, resumen histórico y publicación del score en éxito. El destino es el esquema personal de `phase3` en el catálogo `workspace`; se procesaron 115 archivos con 2,142,846 tickets admitidos.
-- [Dashboard publicado](https://dbc-eb170ead-6845.cloud.databricks.com/dashboardsv3/01f1e3bc8da91e4d95ee22717db572ee/published?w=7474659154935244). Usa el warehouse del reto con credenciales de quien consulta.
-- El score publicó **268,580 tickets elegibles** para el histórico. En los 21 días evaluados (31 de julio al 20 de agosto), hubo 46,387 candidatos. Usaron referencia local 40,686, referencia de cadena 5,347 y 354 quedaron con historial insuficiente. Cobertura de referencia, **99.24%**.
-- Con el mismo presupuesto de 420 casos por lista, los dos rankings coincidieron en **49**. La cola asignó **371** plazas a tickets distintos de los seleccionados por importe. Dentro de la cola, 413 recibieron puntos por una tasa inusual. El piloto debe medir qué casos fueron accionables.
+**Datos reales, últimos 21 días (31 jul – 20 ago), 20 lugares por día:**
 
-- [Reejecución incremental sin nuevas entradas](https://dbc-eb170ead-6845.cloud.databricks.com/jobs/1077728338396415/runs/1116339657234833?o=7474659154935244). Coincidieron conteos y huellas de Bronze (2,142,846 filas), KPIs (130,259) y modelo (268,580), excluyendo la hora de publicación.
-- [Regresión y análisis en Databricks](https://dbc-eb170ead-6845.cloud.databricks.com/jobs/836429566572761/runs/57036081848935?o=7474659154935244). Pasaron las regresiones sintéticas, los controles sobre el histórico y los tres notebooks de análisis.
-- [Reproducción con dos archivos sintéticos](https://dbc-eb170ead-6845.cloud.databricks.com/?o=7474659154935244#job/930161027546315/run/212705952639998). Con el mismo checkpoint Auto Loader produjo **1 → 3 → 3** filas en Bronze después de dos llegadas y una reejecución. Dos tickets fueron admitidos. El segundo, con tres advertencias, conservó $10.00 de descuento y propina nula. El tercer registro quedó en cuarentena por llave incompleta.
-- Los cuatro datasets del dashboard se ejecutaron en su warehouse sobre el esquema desplegado. El 20 de agosto devuelve **20 tickets** con motivos y referencia. Calidad mostró cero llaves duplicadas y 100% de cobertura de conciliación en el histórico.
+- 46,387 candidatos. El 99.24 % tuvo referencia válida: 40,686 de su tienda, 5,347 de la cadena y 354 sin historial suficiente.
+- De 420 lugares, la cola v1 y la lista por monto coinciden solo en **49**; los otros **371** son tickets que ordenar por monto no habría visto. 413 de los tickets de la cola recibieron puntos por tasa inusual.
+- La v2 conserva 344 de esos 420 tickets y agrega 78 por conducta del empleado.
+
+**Simulación, 7 días (21–27 ago):** la v2 encontró **45 de 56 empleado-días sembrados (80 %)**, contra 24 (43 %) de la lista por monto y 14 (25 %) de la v1. Detalle en [modelo_v2.md](modelo_v2.md) y [demo_fase3.md](demo_fase3.md).
+
+**Pruebas de funcionamiento:**
+
+- Una segunda corrida sin archivos nuevos dejó idénticos los conteos y las huellas de Bronze (2,142,846 filas), KPIs (130,259) y modelo (268,580).
+- Pasaron las regresiones con datos sintéticos, los controles sobre el histórico y los tres notebooks de análisis.
+- Prueba con dos archivos sintéticos: Bronze pasó de **1 → 3 → 3** filas tras dos llegadas y una reejecución. Un ticket con tres advertencias entró conservando sus $10.00 de descuento, y un registro sin llave quedó en cuarentena.
 
 ## Ingesta, calidad y publicación
 
-- **Entrada.** Auto Loader lee archivos JSON diarios e inmutables en `<source_path>/facts/checks/brand=rmh/dt=AAAA-MM-DD/`. Un archivo nuevo debe tener ruta nueva. La fecha de negocio debe coincidir con la carpeta. El checkpoint conserva el progreso. Las correcciones que reemplazan un ticket necesitan un contrato de revisiones con una versión explícita.
-- **Advertencias.** Campos nuevos de raíz o anidados, artículo sin ID con importes válidos y propina ausente entran a Silver con `_dq_warnings`. Un detalle sin ID sigue aportando a importes y volumen de artículos, con esa limitación para análisis de producto. Si falta una propina, el total de propina del ticket queda nulo. Ventas, importes de pago y descuentos utilizables se conservan.
-- **Cobertura.** La conciliación usa los tickets con propina observable. El dashboard informa tanto la conciliación como su cobertura. Las sumas de propina agregan únicamente propinas observadas. Calidad muestra conteos de advertencias admitidas, propinas desconocidas y líneas sin identificador.
-- **Cuarentena.** El JSON y sus coordenadas permanecen en Bronze. Un error de formato, llave, fecha o importe esencial deja fuera el registro afectado. La compuerta conserva los controles críticos existentes. Un diagnóstico de archivo vacío o ilegible representa un archivo de cardinalidad desconocida. Los datos admisibles continúan a Silver. Si falla la compuerta, la última cola publicada sigue disponible y el pipeline y la cola pueden mostrar distintas marcas de actualización.
-- **Ejecución.** `refresh_pipeline → data_quality_gate → publish_review_queue`. El resumen histórico de empleados/tiendas también se ejecuta tras la compuerta. El score recalcula todas las fechas disponibles a partir de tablas actualizadas, de modo que una llegada tardía válida puede modificar los días siguientes de su ventana. Cada publicación reemplaza su tabla en un commit Delta. La hora de publicación cambia al repetir, aunque las posiciones pueden quedar idénticas.
-- **Cadencia.** La configuración propone 06:00 `America/Chicago`, una corrida simultánea y reintentos. En QA se ejecuta a demanda. La fecha histórica máxima por sí sola no demuestra frescura. Se propone activar la programación al acordar el horario de entrega del POS y el umbral de atraso con Operaciones.
+- **Entrada:** Auto Loader lee los JSON diarios en `<source_path>/facts/checks/brand=rmh/dt=AAAA-MM-DD/`. Cada archivo nuevo debe tener ruta nueva, y la fecha de negocio debe coincidir con la carpeta.
+- **Advertencias:** un campo nuevo, un artículo sin ID o una propina ausente no tiran el ticket. Entra a Silver con `_dq_warnings` y se conservan sus importes válidos. Si falta la propina, queda como desconocida.
+- **Cobertura:** la conciliación se calcula sobre los tickets con propina conocida, y el dashboard muestra la conciliación y su cobertura por separado.
+- **Cuarentena:** un error de formato, llave, fecha o importe esencial deja el registro en Bronze con su JSON y su motivo. La compuerta bloquea la publicación; mientras tanto sigue visible la última cola publicada.
+- **Ejecución:** `refresh_pipeline → data_quality_gate → publish_review_queue`. El score se recalcula para todas las fechas, así que una llegada tardía puede cambiar los días siguientes de su ventana.
+- **Horario:** propuesto a las 06:00 `America/Chicago`. Está pausado hasta acordar con Operaciones la hora de entrega del POS.
 
-Referencias de plataforma. [Auto Loader y archivos inmutables](https://docs.databricks.com/aws/en/ingestion/cloud-object-storage/auto-loader/faq), [parametrización de dashboards en bundles](https://docs.databricks.com/aws/en/dev-tools/bundles/examples#dashboard-catalog-and-schema-parameterization).
+## Dashboard
 
-## Dashboard y demo
+1. **Descuentos:** tickets, venta, descuento y tasa, con barras por forma de pago y canal. Los filtros globales (fecha, tienda, canal, pago y datos reales o simulados) se mantienen entre pestañas.
+2. **Cola de revisión:** los tickets del día con sus motivos, el desglose de puntos, la tasa frente a su referencia, la posición por monto y si tienen advertencia de datos.
+3. **Calidad y frescura:** último día procesado, última publicación de la cola, advertencias, cuarentena y cobertura de conciliación.
+4. **Simulación** (solo en el target `demo`): días simulados, tickets sembrados y cuántos encuentra la cola.
 
-1. **Descuentos.** KPIs de tickets, bruto, descuento y tasa ponderada `SUM(descuento) / SUM(bruto)`. Cambiar fecha, tienda, canal o pago y observar la tendencia.
-2. **Cola de revisión.** Elegir un día y leer el motivo de un caso, su tasa y la referencia. La posición es global por fecha. Filtrar una tienda muestra sus tickets dentro de ese top global. Comparar la posición por score con la posición por monto para explicar la prioridad.
-3. **Calidad y frescura.** Revisar el último día del pipeline, el último día con candidatos, la hora de publicación, propinas no observables y los conteos de advertencias y cuarentena. El dashboard omite JSON original, nombres e IDs de empleados.
+El dashboard no muestra el JSON original ni nombres de empleados, y se publica con los permisos de datos de quien lo despliega.
 
-El dashboard nativo usa las credenciales de quien lo abre. Los datos de origen y el detalle de Bronze quedan en el workspace. La página de incidencias consulta un agregado de Gold que conserva fecha, archivo, tipo, motivo y conteo. Los permisos de los jueces se deben acordar antes de compartir.
+## Alcance para la final
 
-## Alcance de la presentación final
-
-| Entregable de la rúbrica | Evidencia prevista |
+| Entregable | Evidencia |
 |---|---|
-| Pipeline funcional | Reproducir dos llegadas, reejecutar sin archivo nuevo y comprobar huellas de filas y totales. Medir tiempos de ingesta y ejecución. |
-| Calidad y trazabilidad | Demostrar una advertencia que conserva un ticket, una cuarentena y una falla de compuerta, con sus conteos por capa. |
-| Insights | Contrastar efectivo, duración y canal. Cuantificar cuánto cambia el top 20 al usar contexto y explicar casos individuales. |
-| Dashboard y KPIs | Mostrar las tres páginas, filtros y dos fechas de negocio, incluyendo la trazabilidad de una alerta. |
-| Solución analítica | Medir cobertura y comparar con ranking por importe con el mismo presupuesto diario. Usar observaciones estrictamente anteriores para cada score. |
-| Recomendaciones | Revisar primero autorizaciones discrecionales y tickets de larga duración. En el piloto, auditar muestras de ambas listas y una muestra fuera de ellas. |
-| Documentación técnica | Reproducir el bundle, las pruebas, la definición del score, supuestos, responsables y respuesta ante fallas. |
-| Presentación ejecutiva | Contar la decisión, mostrar el recorrido de un ticket y presentar resultados del piloto si las etiquetas están disponibles. |
+| Pipeline funcional | Llegada de un día nuevo en vivo, reejecución sin cambios y tiempos medidos |
+| Calidad y trazabilidad | Una advertencia que conserva el ticket, una cuarentena y la compuerta deteniendo la publicación |
+| Insights | Efectivo, duración y canal; cuánto cambia la cola frente a ordenar por monto |
+| Dashboard y KPIs | Las cuatro páginas con filtros globales |
+| Solución analítica | Cobertura de la cola v2 sobre abuso sembrado y comparación con la lista por monto |
+| Recomendaciones | Revisar primero autorizaciones discrecionales, autoaprobaciones y tickets de 4 h+ |
+| Documentación técnica | Bundle, pruebas, definición del score, supuestos y respuesta ante fallas |
+| Presentación ejecutiva | Recorrido de un ticket de la llegada a la cola, y resultados |
 
-Para el piloto, etiquetar cada expediente como **accionable**, **legítimo** o **evidencia insuficiente** con un checklist común. Verificar autorización, elegibilidad de promoción, momento de descuento y cierre. Ocultar al revisor el ranking de origen y resolver discrepancias. Reportar casos accionables por cada 20 revisiones, casos sin evidencia, cobertura de referencia, horas de revisión y monto asociado. Sin etiquetas revisadas, reportar cobertura, comparación de listas y casos ilustrativos como evidencia de funcionamiento.
+**Piloto propuesto:** cada caso revisado se etiqueta como accionable, legítimo o evidencia insuficiente, con un checklist común (autorización, elegibilidad de la promoción, momento del descuento, cierre). El revisor no ve de qué lista viene el caso. La medida de éxito es **casos accionables por cada 20 revisiones**, comparando la cola contra la lista por monto.
 
-## Archivos modificados y reproducción
+## Archivos de esta fase
 
 | Archivo | Cambio |
 |---|---|
-| `src/transformations/bronze/bronze_checks.py` | Agrega advertencias recuperables, valida capacidad decimal y mantiene cuarentena y trazabilidad. |
-| `src/transformations/silver/st_checks_cleaned.py`, `st_details_cleaned.py` | Conservan advertencias, propina agregada desconocida y líneas sin ID. |
-| `src/transformations/gold/mv_calidad_datos.sql`, `mv_incidencias_ingesta.sql` | Añaden cobertura y conteos de calidad, y exponen un agregado de incidentes sin procesar el JSON en el dashboard. |
-| `src/jobs/modelo_revision.sql`, `publicar_revision.py` | Calculan el score, explicaciones, ranking por monto y snapshot Delta posterior a calidad. |
-| `databricks.yml`, `resources/jobs/*.yml` | Agregan tarea de publicación, opción de pausa y destino aislado `phase3` con recursos propios y job de aceptación. |
-| `resources/dashboards/revision_descuentos.lvdash.json` | Tres páginas AI/BI, consultas, filtros y tabla de revisión. |
-| `tests/acceptance/validate_pipeline.py`, `replay_ingestion.py`, `validation/sql/fase3_*.sql` | Regresiones de calidad y score, reproducción de dos llegadas, idempotencia y comparación histórica de listas. |
-| `scripts/collect_evidence.py` | Permite seleccionar las consultas de Fase 3 por nombre y conserva el alcance predeterminado de Fase 2. |
-| `README.md`, `docs/calidad.md`, `docs/fase3*.md` | Enlazan la entrega y explican operación, evidencia y pitch. |
+| `src/transformations/bronze/bronze_checks.py` | Advertencias recuperables y validación de capacidad decimal |
+| `src/transformations/silver/st_checks_cleaned.py`, `st_details_cleaned.py` | Conservan advertencias, propina desconocida y líneas sin ID |
+| `src/transformations/gold/mv_calidad_datos.sql`, `mv_incidencias_ingesta.sql` | Cobertura, conteos de calidad y resumen de incidencias por archivo |
+| `src/jobs/modelo_revision.sql`, `publicar_revision.py` | Score, motivos, ranking por monto y publicación después de la compuerta |
+| `src/simulacion/` | Simulador de días con abuso sembrado |
+| `databricks.yml`, `resources/jobs/*.yml` | Tarea de publicación, targets `phase3` y `demo`, job de simulación |
+| `resources/dashboards/revision_descuentos.lvdash.json` | Dashboard AI/BI |
+| `tests/`, `validation/sql/fase3_*.sql` | Regresiones, prueba de llegadas, idempotencia, comparación de listas y simulación |
 
 ```bash
 python3 scripts/validate_local.py
-databricks bundle validate -p APPLEBEES -t phase3 --var dashboard_warehouse_id=ID_DEL_WAREHOUSE
-databricks bundle plan -p APPLEBEES -t phase3 --var dashboard_warehouse_id=ID_DEL_WAREHOUSE
-databricks bundle deploy -p APPLEBEES -t phase3 --var dashboard_warehouse_id=ID_DEL_WAREHOUSE
-databricks bundle run daily_orchestration_job -p APPLEBEES -t phase3 --var dashboard_warehouse_id=ID_DEL_WAREHOUSE
-databricks bundle run validation_job -p APPLEBEES -t phase3 --var dashboard_warehouse_id=ID_DEL_WAREHOUSE
-python3 scripts/collect_evidence.py --warehouse-id ID_DEL_WAREHOUSE --schema ESQUEMA_DEL_TARGET \
-  --only fase3_revision.sql --output .local/fase3/benchmark.json
+databricks bundle deploy -t phase3 --var dashboard_warehouse_id=ID_DEL_WAREHOUSE
+databricks bundle run daily_orchestration_job -t phase3 --var dashboard_warehouse_id=ID_DEL_WAREHOUSE
+databricks bundle run validation_job -t phase3 --var dashboard_warehouse_id=ID_DEL_WAREHOUSE
 ```
 
-Las rutas del dashboard usan el catálogo y esquema del target. Un destino nuevo relee el histórico desde el origen para aplicar el cambio de admisión. En un esquema con checkpoints previos se necesita una migración o una reconstrucción planificada para que filas antiguas también adopten el nuevo tratamiento.
-
-La prueba de llegadas es opcional y puede ejecutarse desde el notebook sincronizado `tests/acceptance/replay_ingestion`, indicando `catalog` y `schema` del target Fase 3. Crea un volumen privado con rutas aleatorias y una tabla de evidencia por corrida. Usa entradas sintéticas y el mismo parser del pipeline.
+Un target nuevo vuelve a leer todo el histórico desde el origen. En un esquema que ya tiene checkpoints, aplicar el cambio de admisión a filas antiguas requiere un full refresh.

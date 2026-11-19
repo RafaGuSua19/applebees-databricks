@@ -52,4 +52,24 @@ targets:
           warehouse_id: ${var.dashboard_warehouse_id}
           dataset_catalog: ${var.catalog}
           dataset_schema: ${var.schema}
-          embed_credentials: false
+          embed_credentials: true
+  demo:
+    mode: development
+    variables:
+      schema: applebees_demo
+      source_path: /Volumes/workspace/default/applebees_demo
+    resources:
+      pipelines:
+        applebees_pipeline:
+          name: applebees_demo_descuentos_pipeline
+      jobs:
+        daily_orchestration_job:
+          name: applebees_demo_daily_orchestration
+      dashboards:
+        revision_descuentos:
+          display_name: Applebee’s | Revisión de descuentos (demo)
+          file_path: resources/dashboards/revision_descuentos_demo.lvdash.json
+          warehouse_id: ${var.dashboard_warehouse_id}
+          dataset_catalog: ${var.catalog}
+          dataset_schema: ${var.schema}
+          embed_credentials: true

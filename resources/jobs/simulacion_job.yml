@@ -1,0 +1,36 @@
+# Solo demo: genera un día simulado y dispara la orquestación diaria completa
+# (pipeline -> compuerta de calidad -> alertas). Pausado por defecto.
+targets:
+  demo:
+    resources:
+      jobs:
+        simulacion_job:
+          name: applebees_simulacion
+          max_concurrent_runs: 1
+          # Otros integrantes pueden lanzar la simulación; el job corre con la identidad del dueño.
+          permissions:
+            - user_name: a01645436@tec.mx
+              level: CAN_MANAGE_RUN
+          schedule:
+            quartz_cron_expression: "0 0/15 * * * ?"   # cada 15 min mientras dure la demo
+            timezone_id: America/Chicago
+            pause_status: PAUSED
+          tasks:
+            - task_key: generar_dia
+              description: Escribe el siguiente día de tickets simulados en el volumen de demo
+              notebook_task:
+                notebook_path: ../../src/simulacion/simulador_tickets.py
+                base_parameters:
+                  accion: generar
+                  destino: ${var.source_path}
+                  catalog: ${var.catalog}
+                  schema: ${var.schema}
+                  n_dias: "1"
+              max_retries: 0
+
+            - task_key: orquestacion
+              description: Ingesta incremental del archivo nuevo, calidad y alertas
+              depends_on:
+                - task_key: generar_dia
+              run_job_task:
+                job_id: ${resources.jobs.daily_orchestration_job.id}

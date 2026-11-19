@@ -22,7 +22,7 @@ Duración propuesta de **4 minutos y 30 segundos**. La exposición en inglés si
 
 > We can start on Discounts and filter by business date, store, channel or payment. Then we move to Review Queue and read one ticket’s reasons and reference rate. Across the last 21 historical days, 371 of 420 picks differed from the amount-only ranking, under the same daily capacity. Quality and Freshness shows which business day reached the pipeline, when scoring was published and how many records were retained with warnings or quarantined.
 
-[Abrir el dashboard de Databricks](https://dbc-eb170ead-6845.cloud.databricks.com/dashboardsv3/01f1e3bc8da91e4d95ee22717db572ee/published?w=7474659154935244). En vivo, abrir **Descuentos → Cola de revisión → Calidad y frescura**. Filtrar al **20 de agosto de 2026** en Cola de revisión. Hay 20 tickets con motivos y referencia contextual. La fecha del negocio y la hora de procesamiento cuentan cosas diferentes. El caso de 40% frente a 10% es la alternativa ilustrativa si el warehouse tarda en cargar.
+Abrir el dashboard de Databricks. En vivo, abrir **Descuentos → Cola de revisión → Calidad y frescura**. Filtrar al **20 de agosto de 2026** en Cola de revisión. Hay 20 tickets con motivos y referencia contextual. La fecha del negocio y la hora de procesamiento cuentan cosas diferentes. El caso de 40% frente a 10% es la alternativa ilustrativa si el warehouse tarda en cargar.
 
 ## 3:45–4:30 · Final scope and success measure
 
