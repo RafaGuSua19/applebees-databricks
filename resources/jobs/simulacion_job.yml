@@ -7,6 +7,10 @@ targets:
         simulacion_job:
           name: applebees_simulacion
           max_concurrent_runs: 1
+          # Otros integrantes pueden lanzar la simulación; el job corre con la identidad del dueño.
+          permissions:
+            - user_name: a01645436@tec.mx
+              level: CAN_MANAGE_RUN
           schedule:
             quartz_cron_expression: "0 0/15 * * * ?"   # cada 15 min mientras dure la demo
             timezone_id: America/Chicago

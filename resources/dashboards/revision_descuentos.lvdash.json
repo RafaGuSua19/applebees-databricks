@@ -11,7 +11,29 @@
       "name": "revision",
       "displayName": "Tickets y motivos de revisión",
       "queryLines": [
-        "SELECT s.dt, CONCAT(COALESCE(l.Tienda, 'Tienda sin nombre'), ' · ', s.LocationId) AS tienda,\n       COALESCE(c.Canal, 'Sin canal') AS canal, s.tipo_pago, CAST(s.CheckId AS STRING) AS ticket,\n       s.score, s.prioridad_dia, s.prioridad_por_monto, round(s.descuento, 2) AS descuento_usd,\n       round(100 * s.tasa_ticket, 2) AS pct_ticket, round(100 * s.tasa_referencia, 2) AS pct_contexto,\n       s.tickets_referencia, s.grupo_referencia, s.motivos, s.publicado_en,\n       concat_ws(' · ',\n         IF(s.puntos_contexto > 0, concat('Tasa inusual ', s.puntos_contexto), NULL),\n         IF(s.puntos_autoaprobado > 0, concat('Autoaprobación ', s.puntos_autoaprobado), NULL),\n         IF(s.puntos_sin_gerente > 0, concat('Sin gerente ', s.puntos_sin_gerente), NULL),\n         IF(s.puntos_duracion > 0, concat('4 h+ ', s.puntos_duracion), NULL)) AS desglose,\n       round(s.z_tasa, 1) AS desviaciones,\n       CASE WHEN s.con_advertencia THEN 'Sí' ELSE 'No' END AS advertencia_datos,\n       coalesce(nullif(concat_ws(', ', k._dq_warnings), ''), '—') AS detalle_advertencia,\n       'Real' AS origen\nFROM gold_revision_descuentos s\nLEFT JOIN silver_locations l ON s.LocationId = l.LocationId\nLEFT JOIN silver_revenue_centers c ON s.CheckRevenueCenterId = c.CheckRevenueCenterId\nLEFT JOIN silver_checks k ON k.dt = s.dt AND k.LocationId = s.LocationId AND k.CheckId = s.CheckId\nWHERE s.prioridad_dia <= 20 AND s.score >= 2\nORDER BY s.dt DESC, s.prioridad_dia"
+        "SELECT s.dt, CONCAT(COALESCE(l.Tienda, 'Tienda sin nombre'), ' · ', s.LocationId) AS tienda,\n",
+        "       COALESCE(c.Canal, 'Sin canal') AS canal, s.tipo_pago, CAST(s.CheckId AS STRING) AS ticket,\n",
+        "       s.score, s.prioridad_dia, s.prioridad_por_monto, round(s.descuento, 2) AS descuento_usd,\n",
+        "       round(100 * s.tasa_ticket, 2) AS pct_ticket, round(100 * s.tasa_referencia, 2) AS pct_contexto,\n",
+        "       s.tickets_referencia, s.grupo_referencia, s.motivos, s.publicado_en,\n",
+        "       concat_ws(' · ',\n",
+        "         IF(s.puntos_contexto > 0, concat('Tasa inusual ', s.puntos_contexto), NULL),\n",
+        "         IF(s.puntos_autoaprobado > 0, concat('Autoaprobación ', s.puntos_autoaprobado), NULL),\n",
+        "         IF(s.puntos_sin_gerente > 0, concat('Sin gerente ', s.puntos_sin_gerente), NULL),\n",
+        "         IF(s.puntos_duracion > 0, concat('4 h+ ', s.puntos_duracion), NULL),\n",
+        "         IF(s.puntos_empleado > 0, concat('Conducta del empleado ', s.puntos_empleado), NULL)) AS desglose,\n",
+        "       s.descuentos_7d, s.base_semanal,\n",
+        "       regexp_replace(s.motivos, 'Empleado con [^+]*', 'Conducta inusual del empleado') AS motivo_tipo,\n",
+        "       round(s.z_tasa, 1) AS desviaciones,\n",
+        "       CASE WHEN s.con_advertencia THEN 'Sí' ELSE 'No' END AS advertencia_datos,\n",
+        "       coalesce(nullif(concat_ws(', ', k._dq_warnings), ''), '—') AS detalle_advertencia,\n",
+        "       'Real' AS origen\n",
+        "FROM gold_revision_descuentos s\n",
+        "LEFT JOIN silver_locations l ON s.LocationId = l.LocationId\n",
+        "LEFT JOIN silver_revenue_centers c ON s.CheckRevenueCenterId = c.CheckRevenueCenterId\n",
+        "LEFT JOIN silver_checks k ON k.dt = s.dt AND k.LocationId = s.LocationId AND k.CheckId = s.CheckId\n",
+        "WHERE s.prioridad_dia <= 20 AND s.score >= 2\n",
+        "ORDER BY s.dt DESC, s.prioridad_dia"
       ]
     },
     {
@@ -518,8 +540,8 @@
             "multilineTextboxSpec": {
               "lines": [
                 "## Tickets para revisión\n\n",
-                "Hasta **20 tickets por día** con al menos **2 de 7 puntos**. Cada ticket se compara con los 28 días anteriores de su misma tienda, canal y forma de pago. ",
-                "**Puntos:** tasa inusual 3 (≥3 desviaciones y ≥10 pp arriba) o 2 (≥2 desv. y ≥8 pp) · autoaprobación 2 · MANAGER/WALKOUT sin gerente 1 · abierto 4 h+ 1. ",
+                "Hasta **20 tickets por día** con al menos **2 de 10 puntos**, y máximo 2 por empleado para cubrir más casos. Cada ticket se compara con los 28 días anteriores de su misma tienda, canal y forma de pago. ",
+                "**Puntos:** tasa inusual 3 (≥3 desviaciones y ≥10 pp arriba) o 2 (≥2 desv. y ≥8 pp) · autoaprobación 2 · MANAGER/WALKOUT sin gerente 1 · abierto 4 h+ 1 · **conducta del empleado 3 o 2** (muchos MANAGER/WALKOUT en 7 días frente a su propio promedio). ",
                 "**Advertencia de datos = Sí** cuando el ticket entró con un detalle menor (propina desconocida, artículo sin ID, campo nuevo); no suma ni resta puntos."
               ]
             }
@@ -714,6 +736,14 @@
                       "expression": "`desviaciones`"
                     },
                     {
+                      "name": "descuentos_7d",
+                      "expression": "`descuentos_7d`"
+                    },
+                    {
+                      "name": "base_semanal",
+                      "expression": "`base_semanal`"
+                    },
+                    {
                       "name": "grupo_referencia",
                       "expression": "`grupo_referencia`"
                     },
@@ -761,7 +791,7 @@
                   },
                   {
                     "fieldName": "score",
-                    "displayName": "Puntos / 7"
+                    "displayName": "Puntos / 10"
                   },
                   {
                     "fieldName": "desglose",
@@ -786,6 +816,14 @@
                   {
                     "fieldName": "desviaciones",
                     "displayName": "Desviaciones sobre su referencia"
+                  },
+                  {
+                    "fieldName": "descuentos_7d",
+                    "displayName": "MANAGER/WALKOUT del empleado en 7 días"
+                  },
+                  {
+                    "fieldName": "base_semanal",
+                    "displayName": "Su promedio semanal previo"
                   },
                   {
                     "fieldName": "grupo_referencia",
@@ -872,8 +910,8 @@
                   "datasetName": "revision",
                   "fields": [
                     {
-                      "name": "motivos",
-                      "expression": "`motivos`"
+                      "name": "motivo_tipo",
+                      "expression": "`motivo_tipo`"
                     },
                     {
                       "name": "motivos_frec",
@@ -899,7 +937,7 @@
                   }
                 },
                 "y": {
-                  "fieldName": "motivos",
+                  "fieldName": "motivo_tipo",
                   "displayName": "Motivos",
                   "scale": {
                     "type": "categorical",

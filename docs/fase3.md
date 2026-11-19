@@ -22,7 +22,7 @@ La guía de Fase 2 preliminar y el EDA incluyen un universo de 2,960. El informe
 1. Se puntúa una fila por ticket admitido con bruto y descuento positivos. Su tasa es descuento total entre venta bruta. Las líneas de descuento positivas explican autoaprobación y ausencia de gerente para MANAGER/WALKOUT.
 2. Para cada fecha, se aprende la media y desviación estándar poblacional de las tasas individuales en los **28 días calendario anteriores**. Las tasas de referencia se limitan a 100% al estimar la distribución. El valor original del ticket sigue visible y se usa para su desviación. La desviación estándar tiene un piso de 2 puntos porcentuales para cohortes uniformes.
 3. Se busca una referencia de la misma tienda, canal y forma de pago con ≥50 tickets descontados en ≥7 días con descuentos. Cuando no alcanza, se usa la cadena para el mismo canal y pago con ≥200 tickets en ≥7 días con descuentos. Con historia insuficiente, se muestra el estado y los puntos contextuales quedan en cero.
-4. Se explica cada punto con la evidencia observable. El puntaje toma un valor de 0 a 7 y cada ticket tiene una posición por score y otra por importe.
+4. Se explica cada punto con la evidencia observable. La v2 suma conducta por empleado al score de 0 a 10 y limita a dos los tickets del mismo empleado por día en la cola. Todos los tickets candidatos conservan una posición por importe. [Reglas y resultados de la v2](modelo_v2.md).
 
 | Señal | Puntos |
 |---|---:|
@@ -31,14 +31,15 @@ La guía de Fase 2 preliminar y el EDA incluyen un universo de 2,960. El informe
 | Algún descuento positivo con autoaprobación identificada | 2 |
 | MANAGER o WALKOUT positivo sin gerente identificado | 1 |
 | Duración de al menos cuatro horas | 1 |
+| Aumento de MANAGER/WALKOUT del empleado en siete días frente a su referencia semanal | 2 o 3 |
 
-El desempate ordena por importe de descuento descendente, tienda y ticket. La vista operativa muestra hasta **20 por fecha**, con mínimo **2 puntos**. La advertencia de calidad viaja junto al ticket y aporta cero puntos. Los umbrales son decisiones iniciales de diseño. La operación humana conserva la decisión de abrir y cerrar cada caso.
+Entre tickets con el mismo score, el desempate ordena por importe de descuento descendente, tienda y ticket. La vista operativa muestra hasta **20 por fecha**, con mínimo **2 puntos**. La advertencia de calidad viaja junto al ticket y aporta cero puntos. Los umbrales son decisiones iniciales de diseño. La operación humana conserva la decisión de abrir y cerrar cada caso.
 
 **Ejemplo simulado usado en la prueba.** Un ticket con $40 de descuento sobre $100 tiene una tasa del 40% frente a una media contextual del 10%. Si registra autoaprobación y dura 245 minutos, suma 6 puntos (3 + 2 + 1). Queda primero por score y tercero por importe en ese lote. El modelo también identifica cuándo usa la referencia de cadena o carece de historial.
 
 La base usa movimientos positivos y habilita revisiones con evidencia directa aun cuando la cohorte es pequeña. El benchmark de ranking por importe enfrenta la misma población de candidatos y las mismas plazas diarias. El SQL de evaluación compara sus posiciones durante los últimos 21 días disponibles. La comparación mide cobertura y solapamiento entre listas. El valor predictivo se evaluará con resultados de auditoría humana.
 
-## Primera ejecución en Databricks
+## Primera ejecución en Databricks con v1
 
 - [Corrida histórica, 18 de noviembre](https://dbc-eb170ead-6845.cloud.databricks.com/jobs/1077728338396415/runs/700306622758077?o=7474659154935244). Ingesta, compuerta, resumen histórico y publicación del score en éxito. El destino es el esquema personal de `phase3` en el catálogo `workspace`; se procesaron 115 archivos con 2,142,846 tickets admitidos.
 - [Dashboard publicado](https://dbc-eb170ead-6845.cloud.databricks.com/dashboardsv3/01f1e3bc8da91e4d95ee22717db572ee/published?w=7474659154935244). Usa el warehouse del reto con los permisos de datos de quien lo publica.

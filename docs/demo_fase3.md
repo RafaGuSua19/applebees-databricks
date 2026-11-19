@@ -48,7 +48,7 @@ Simulador ──► Volumen demo ──► Auto Loader ──► Silver ──�
    **Medir cuánto tarda cada corrida.** Con ese tiempo decidimos si la corrida en vivo cabe en el pitch.
 6. Abrir el dashboard de demo, ir a **Simulación** y revisar `validation/sql/fase3_simulacion.sql`. Anotar el % de sembrados que entra a la cola por patrón: ese es el resultado que vamos a contar.
 
-## Ensayos completados en Databricks
+## Ensayos iniciales con la v1
 
 [Dashboard de demo](https://dbc-eb170ead-6845.cloud.databricks.com/dashboardsv3/01f1e3d2467715c89940a6cd05daec17/published?w=7474659154935244) · [Dashboard de datos reales](https://dbc-eb170ead-6845.cloud.databricks.com/dashboardsv3/01f1e3bc8da91e4d95ee22717db572ee/published?w=7474659154935244)
 
@@ -74,7 +74,7 @@ El modelo puntuó los 204 casos. Las 23 entradas en la cola fueron autoaprobacio
 
 La demo quedó en 37 archivos y 668,743 tickets admitidos, con cero duplicados y cero registros en cuarentena. `phase3` permaneció en 115 archivos, 2,142,846 tickets y fecha de corte del 20 de agosto. Pasaron las 15 pruebas locales y las 29 consultas de widgets de `phase3` y 43 de `demo`. La página Simulación vive en el dashboard de demo y usa las etiquetas de `sim_tickets_sembrados`, la bitácora y el score existente.
 
-Para el pitch, mostrar el día del **22 de agosto ya procesado**. Las dos corridas completas tardaron más de cuatro minutos.
+Las dos corridas completas tardaron más de cuatro minutos. Consulta los [resultados con la v2](modelo_v2.md) para preparar el pitch con el dashboard vigente.
 
 ## La demo en vivo
 

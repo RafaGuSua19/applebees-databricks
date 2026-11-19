@@ -11,7 +11,6 @@
 # La fuente original solo se lee.
 import json
 import os
-import re
 from datetime import date, timedelta
 
 from pyspark.sql import functions as F
@@ -46,10 +45,10 @@ TABLA_VERDAD = f"{ESQUEMA}.sim_fraude_sembrado"
 TABLA_BITACORA = f"{ESQUEMA}.sim_bitacora"
 TABLA_TICKETS = f"{ESQUEMA}.sim_tickets_sembrados"
 
-VOLUMEN = re.fullmatch(r"/Volumes/([A-Za-z_][A-Za-z_0-9]*)/([A-Za-z_][A-Za-z_0-9]*)/(applebees_demo)", DESTINO)
-if (not VOLUMEN or VOLUMEN[1] != CATALOGO or ESQUEMA_DEMO != "applebees_demo"
-        or ORIGEN == DESTINO):
-    raise ValueError("El simulador requiere su volumen y esquema dedicados applebees_demo")
+# El job se ejecuta como su propietario aunque otro integrante lo lance con parámetros.
+if (ORIGEN != "/Volumes/workspace/default/applebees" or
+        DESTINO != "/Volumes/workspace/default/applebees_demo" or ESQUEMA != "workspace.applebees_demo"):
+    raise ValueError("El simulador usa el origen oficial y su volumen y esquema dedicados applebees_demo")
 if min(DIAS_HISTORIA, N_DIAS, N_EMPLEADOS, TICKETS_POR_EMPLEADO) < 1:
     raise ValueError("Los días, empleados y tickets por empleado deben ser positivos")
 
@@ -89,8 +88,7 @@ def listar_fechas(base):
 
 def preparar():
     spark.sql(f"CREATE SCHEMA IF NOT EXISTS {ESQUEMA}")
-    cat, esq, vol = VOLUMEN.groups()
-    spark.sql(f"CREATE VOLUME IF NOT EXISTS {cat}.{esq}.{vol}")
+    spark.sql("CREATE VOLUME IF NOT EXISTS workspace.default.applebees_demo")
     spark.sql(f"CREATE TABLE IF NOT EXISTS {TABLA_BITACORA} ({ESTRUCTURA_BITACORA}, generado_en timestamp) USING DELTA")
     spark.sql(f"CREATE TABLE IF NOT EXISTS {TABLA_TICKETS} ({ESTRUCTURA_TICKETS}) USING DELTA")
     if not existe(f"{DESTINO}/dimensions"):
