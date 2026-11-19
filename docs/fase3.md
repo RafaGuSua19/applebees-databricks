@@ -63,11 +63,11 @@ Referencias de plataforma. [Auto Loader y archivos inmutables](https://docs.data
 
 ## Dashboard y demo
 
-1. **Descuentos.** KPIs de tickets, bruto, descuento y tasa ponderada `SUM(descuento) / SUM(bruto)`. Cambiar fecha, tienda, canal o pago y observar la tendencia.
-2. **Cola de revisión.** Elegir un día y leer el motivo de un caso, su tasa y la referencia. La posición es global por fecha. Filtrar una tienda muestra sus tickets dentro de ese top global. Comparar la posición por score con la posición por monto para explicar la prioridad.
+1. **Descuentos.** KPIs de tickets, bruto, descuento y tasa ponderada `SUM(descuento) / SUM(bruto)`, con barras por forma de pago y canal. Los filtros globales aparecen en el panel lateral.
+2. **Cola de revisión.** Elegir un día y leer el motivo de un caso, su tasa y la referencia. La posición es global por fecha. Filtrar una tienda muestra sus tickets dentro de ese top global. Comparar la posición por score con la posición por monto y consultar el desglose de puntos, las desviaciones y las advertencias de calidad.
 3. **Calidad y frescura.** Revisar el último día del pipeline, el último día con candidatos, la hora de publicación, propinas no observables y los conteos de advertencias y cuarentena. El dashboard omite JSON original, nombres e IDs de empleados.
 
-El recurso `revision_descuentos` de `phase3` configura `embed_credentials: true`. El dashboard publicado ejecuta consultas con los permisos de datos de quien lo publica. La página de incidencias consulta un agregado de Gold con fecha, archivo, tipo, motivo y conteo. Cada espectador necesita acceso al dashboard.
+El recurso `revision_descuentos` de `phase3` configura `embed_credentials: true`. El dashboard publicado ejecuta consultas con los permisos de datos de quien lo publica. La página de incidencias consulta un agregado de Gold con fecha, archivo, tipo, motivo y conteo. Cada espectador necesita acceso al dashboard. El target `demo` incorpora una cuarta página con casos sembrados, sobre su volumen y esquema dedicados. [Guía y evidencia de la simulación](demo_fase3.md).
 
 ## Alcance de la presentación final
 

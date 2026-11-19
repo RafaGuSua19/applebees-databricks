@@ -1,0 +1,2171 @@
+{
+  "datasets": [
+    {
+      "name": "operacion",
+      "displayName": "Descuentos diarios",
+      "queryLines": [
+        "SELECT k.dt, CASE WHEN b.dt IS NOT NULL THEN 'Simulado' ELSE 'Real' END AS origen, CONCAT(COALESCE(Tienda, 'Tienda sin nombre'), ' · ', LocationId) AS tienda,\n",
+        "       COALESCE(Canal, 'Sin canal') AS canal, tipo_pago, tickets, venta_bruta, descuento\n",
+        "FROM gold_kpis_diarios k\n",
+        "LEFT JOIN (SELECT DISTINCT dt FROM sim_bitacora) b ON b.dt = k.dt"
+      ]
+    },
+    {
+      "name": "revision",
+      "displayName": "Tickets y motivos de revisión",
+      "queryLines": [
+        "SELECT s.dt, CONCAT(COALESCE(l.Tienda, 'Tienda sin nombre'), ' · ', s.LocationId) AS tienda,\n",
+        "       COALESCE(c.Canal, 'Sin canal') AS canal, s.tipo_pago, CAST(s.CheckId AS STRING) AS ticket,\n",
+        "       s.score, s.prioridad_dia, s.prioridad_por_monto, round(s.descuento, 2) AS descuento_usd,\n",
+        "       round(100 * s.tasa_ticket, 2) AS pct_ticket, round(100 * s.tasa_referencia, 2) AS pct_contexto,\n",
+        "       s.tickets_referencia, s.grupo_referencia, s.motivos, s.publicado_en,\n",
+        "       concat_ws(' · ',\n",
+        "         IF(s.puntos_contexto > 0, concat('Tasa inusual ', s.puntos_contexto), NULL),\n",
+        "         IF(s.puntos_autoaprobado > 0, concat('Autoaprobación ', s.puntos_autoaprobado), NULL),\n",
+        "         IF(s.puntos_sin_gerente > 0, concat('Sin gerente ', s.puntos_sin_gerente), NULL),\n",
+        "         IF(s.puntos_duracion > 0, concat('4 h+ ', s.puntos_duracion), NULL)) AS desglose,\n",
+        "       round(s.z_tasa, 1) AS desviaciones,\n",
+        "       CASE WHEN s.con_advertencia THEN 'Sí' ELSE 'No' END AS advertencia_datos,\n",
+        "       coalesce(nullif(concat_ws(', ', k._dq_warnings), ''), '—') AS detalle_advertencia,\n",
+        "       CASE WHEN k._source_file LIKE '%/brand=rmh_sim/%' THEN 'Simulado' ELSE 'Real' END AS origen\n",
+        "FROM gold_revision_descuentos s\n",
+        "LEFT JOIN silver_locations l ON s.LocationId = l.LocationId\n",
+        "LEFT JOIN silver_revenue_centers c ON s.CheckRevenueCenterId = c.CheckRevenueCenterId\n",
+        "LEFT JOIN silver_checks k ON k.dt = s.dt AND k.LocationId = s.LocationId AND k.CheckId = s.CheckId\n",
+        "WHERE s.prioridad_dia <= 20 AND s.score >= 2\n",
+        "ORDER BY s.dt DESC, s.prioridad_dia"
+      ]
+    },
+    {
+      "name": "calidad",
+      "displayName": "Última actualización y controles",
+      "queryLines": [
+        "SELECT q.fecha_corte AS ultimo_dia_ingestado, s.ultimo_dia_evaluado, q.calculado_en AS refresco_pipeline,\n",
+        "       s.publicado_en AS publicacion_modelo, q.tickets AS tickets_admitidos,\n",
+        "       coalesce(q.tickets_admitidos_con_advertencia, 0) AS tickets_con_advertencia,\n",
+        "       q.registros_rescatados AS registros_en_cuarentena,\n",
+        "       q.tickets_propina_desconocida AS tickets_sin_propina_observable,\n",
+        "       q.lineas_sin_item_id, q.llaves_duplicadas,\n",
+        "       round(100 * q.pct_tickets_conciliados, 5) AS pct_conciliacion_evaluable,\n",
+        "       round(100 * try_divide(q.tickets - q.tickets_propina_desconocida, q.tickets), 5) AS pct_cobertura_conciliacion\n",
+        "FROM gold_calidad_datos q\n",
+        "CROSS JOIN (SELECT max(dt) AS ultimo_dia_evaluado, max(publicado_en) AS publicado_en\n",
+        "            FROM gold_revision_descuentos) s"
+      ]
+    },
+    {
+      "name": "excepciones",
+      "displayName": "Incidencias por archivo",
+      "queryLines": [
+        "SELECT dt, archivo, estado, motivo, registros\n",
+        "FROM gold_incidencias_ingesta\n",
+        "ORDER BY dt DESC, registros DESC"
+      ]
+    },
+    {
+      "name": "sembrados",
+      "displayName": "Tickets con abuso sembrado",
+      "queryLines": [
+        "SELECT t.dt, t.patron, CAST(t.CheckId AS STRING) AS ticket,\n",
+        "       CONCAT(COALESCE(l.Tienda, 'Tienda sin nombre'), ' · ', t.LocationId) AS tienda,\n",
+        "       COALESCE(c.Canal, 'Sin canal') AS canal, k.tipo_pago, 'Simulado' AS origen,\n",
+        "       round(t.monto_sembrado, 2) AS monto_sembrado, r.score, r.prioridad_dia, r.prioridad_por_monto, r.motivos,\n",
+        "       CASE WHEN r.prioridad_dia <= 20 AND r.score >= 2 THEN 1 ELSE 0 END AS en_cola,\n",
+        "       CASE WHEN r.prioridad_por_monto <= 20 THEN 1 ELSE 0 END AS en_top_monto\n",
+        "FROM sim_tickets_sembrados t\n",
+        "LEFT JOIN gold_revision_descuentos r ON r.dt = t.dt AND r.LocationId = t.LocationId AND r.CheckId = t.CheckId\n",
+        "LEFT JOIN silver_locations l ON l.LocationId = t.LocationId\n",
+        "LEFT JOIN silver_checks k ON k.dt = t.dt AND k.LocationId = t.LocationId AND k.CheckId = t.CheckId\n",
+        "LEFT JOIN silver_revenue_centers c ON c.CheckRevenueCenterId = k.CheckRevenueCenterId"
+      ]
+    },
+    {
+      "name": "bitacora",
+      "displayName": "Días simulados",
+      "queryLines": [
+        "SELECT dt, 'Simulado' AS origen, dia_referencia, tickets_generados, tickets_con_abuso, monto_sembrado, generado_en\n",
+        "FROM sim_bitacora"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "operacion",
+      "displayName": "Descuentos",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layout": [
+        {
+          "widget": {
+            "name": "titulo_operacion",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Descuentos y venta bruta\n\n",
+                "Los filtros del panel izquierdo se conservan al cambiar de pestaña. ",
+                "**Tasa = descuento / venta bruta.** «Sin pago» agrupa tickets sin pago registrado, como cortesías o walkouts. En el histórico de Fase 3, su tasa agregada fue de 99.01 %."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "n_tickets",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "operacion",
+                  "fields": [
+                    {
+                      "name": "n_tickets",
+                      "expression": "SUM(`tickets`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "n_tickets",
+                  "displayName": "Tickets"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Tickets"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "total_bruto",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "operacion",
+                  "fields": [
+                    {
+                      "name": "total_bruto",
+                      "expression": "SUM(`venta_bruta`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "total_bruto",
+                  "displayName": "Venta bruta",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Venta bruta"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "total_desc",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "operacion",
+                  "fields": [
+                    {
+                      "name": "total_desc",
+                      "expression": "SUM(`descuento`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "total_desc",
+                  "displayName": "Descuento",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Descuento"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "tasa_total",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "operacion",
+                  "fields": [
+                    {
+                      "name": "tasa_total",
+                      "expression": "try_divide(SUM(`descuento`), SUM(`venta_bruta`))"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "tasa_total",
+                  "displayName": "Descuento / venta bruta",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Descuento / venta bruta"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "tasa_diaria",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "operacion",
+                  "fields": [
+                    {
+                      "name": "dt",
+                      "expression": "`dt`"
+                    },
+                    {
+                      "name": "tasa_diaria",
+                      "expression": "try_divide(SUM(`descuento`), SUM(`venta_bruta`))"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "dt",
+                  "displayName": "Fecha",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "tasa_diaria",
+                  "displayName": "Tasa diaria de descuento",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Tasa diaria de descuento"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 8,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "pago_bruto",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "operacion",
+                  "fields": [
+                    {
+                      "name": "tipo_pago",
+                      "expression": "`tipo_pago`"
+                    },
+                    {
+                      "name": "por_pago",
+                      "expression": "try_divide(SUM(`descuento`), SUM(`venta_bruta`))"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "por_pago",
+                  "displayName": "Tasa de descuento",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "tipo_pago",
+                  "displayName": "Pago",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Tasa de descuento por forma de pago"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 5,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "tasa_canal",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "operacion",
+                  "fields": [
+                    {
+                      "name": "canal",
+                      "expression": "`canal`"
+                    },
+                    {
+                      "name": "tasa_canal",
+                      "expression": "try_divide(SUM(`descuento`), SUM(`venta_bruta`))"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "tasa_canal",
+                  "displayName": "Tasa de descuento",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "canal",
+                  "displayName": "Canal",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Tasa de descuento por canal"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 6,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "desc_pago",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "operacion",
+                  "fields": [
+                    {
+                      "name": "tipo_pago",
+                      "expression": "`tipo_pago`"
+                    },
+                    {
+                      "name": "desc_pago",
+                      "expression": "SUM(`descuento`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "desc_pago",
+                  "displayName": "Descuento",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "tipo_pago",
+                  "displayName": "Pago",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Descuento total por forma de pago"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 11,
+            "width": 6,
+            "height": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "revision",
+      "displayName": "Cola de revisión",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layout": [
+        {
+          "widget": {
+            "name": "titulo_revision",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Tickets para revisión\n\n",
+                "Hasta **20 tickets por día** con al menos **2 de 7 puntos**. Cada ticket se compara con los 28 días anteriores de su misma tienda, canal y forma de pago. ",
+                "**Puntos:** tasa inusual 3 (≥3 desviaciones y ≥10 pp arriba) o 2 (≥2 desv. y ≥8 pp) · autoaprobación 2 · MANAGER/WALKOUT sin gerente 1 · abierto 4 h+ 1. ",
+                "**Advertencia de datos = Sí** cuando el ticket entró con un detalle menor (propina desconocida, artículo sin ID, campo nuevo); no suma ni resta puntos."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "n_casos",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "revision",
+                  "fields": [
+                    {
+                      "name": "n_casos",
+                      "expression": "COUNT(*)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "n_casos",
+                  "displayName": "Tickets en la selección"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Tickets en la selección"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "monto_casos",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "revision",
+                  "fields": [
+                    {
+                      "name": "monto_casos",
+                      "expression": "SUM(`descuento_usd`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "monto_casos",
+                  "displayName": "Descuento asociado",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Descuento asociado"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 3,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "auto_filtrados",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "revision",
+                  "fields": [
+                    {
+                      "name": "auto_filtrados",
+                      "expression": "COUNT_IF(`advertencia_datos` = 'Sí')"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "auto_filtrados",
+                  "displayName": "Casos con advertencia de calidad"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Casos con advertencia de calidad"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 3,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "prioridades",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "revision",
+                  "fields": [
+                    {
+                      "name": "dt",
+                      "expression": "`dt`"
+                    },
+                    {
+                      "name": "prioridad_dia",
+                      "expression": "`prioridad_dia`"
+                    },
+                    {
+                      "name": "ticket",
+                      "expression": "`ticket`"
+                    },
+                    {
+                      "name": "tienda",
+                      "expression": "`tienda`"
+                    },
+                    {
+                      "name": "score",
+                      "expression": "`score`"
+                    },
+                    {
+                      "name": "desglose",
+                      "expression": "`desglose`"
+                    },
+                    {
+                      "name": "motivos",
+                      "expression": "`motivos`"
+                    },
+                    {
+                      "name": "descuento_usd",
+                      "expression": "`descuento_usd`"
+                    },
+                    {
+                      "name": "pct_ticket",
+                      "expression": "`pct_ticket`"
+                    },
+                    {
+                      "name": "pct_contexto",
+                      "expression": "`pct_contexto`"
+                    },
+                    {
+                      "name": "desviaciones",
+                      "expression": "`desviaciones`"
+                    },
+                    {
+                      "name": "grupo_referencia",
+                      "expression": "`grupo_referencia`"
+                    },
+                    {
+                      "name": "tickets_referencia",
+                      "expression": "`tickets_referencia`"
+                    },
+                    {
+                      "name": "prioridad_por_monto",
+                      "expression": "`prioridad_por_monto`"
+                    },
+                    {
+                      "name": "advertencia_datos",
+                      "expression": "`advertencia_datos`"
+                    },
+                    {
+                      "name": "detalle_advertencia",
+                      "expression": "`detalle_advertencia`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "dt",
+                    "displayName": "Fecha"
+                  },
+                  {
+                    "fieldName": "prioridad_dia",
+                    "displayName": "Prioridad"
+                  },
+                  {
+                    "fieldName": "ticket",
+                    "displayName": "Ticket"
+                  },
+                  {
+                    "fieldName": "tienda",
+                    "displayName": "Tienda"
+                  },
+                  {
+                    "fieldName": "score",
+                    "displayName": "Puntos / 7"
+                  },
+                  {
+                    "fieldName": "desglose",
+                    "displayName": "De dónde salen los puntos"
+                  },
+                  {
+                    "fieldName": "motivos",
+                    "displayName": "Motivos"
+                  },
+                  {
+                    "fieldName": "descuento_usd",
+                    "displayName": "Descuento USD"
+                  },
+                  {
+                    "fieldName": "pct_ticket",
+                    "displayName": "Tasa ticket %"
+                  },
+                  {
+                    "fieldName": "pct_contexto",
+                    "displayName": "Tasa referencia %"
+                  },
+                  {
+                    "fieldName": "desviaciones",
+                    "displayName": "Desviaciones sobre su referencia"
+                  },
+                  {
+                    "fieldName": "grupo_referencia",
+                    "displayName": "Referencia"
+                  },
+                  {
+                    "fieldName": "tickets_referencia",
+                    "displayName": "Casos de referencia"
+                  },
+                  {
+                    "fieldName": "prioridad_por_monto",
+                    "displayName": "Posición por monto"
+                  },
+                  {
+                    "fieldName": "advertencia_datos",
+                    "displayName": "¿Advertencia de datos?"
+                  },
+                  {
+                    "fieldName": "detalle_advertencia",
+                    "displayName": "Detalle de la advertencia"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Prioridad y evidencia por ticket"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 12,
+            "height": 10
+          }
+        },
+        {
+          "widget": {
+            "name": "fuera_monto",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "revision",
+                  "fields": [
+                    {
+                      "name": "fuera_monto",
+                      "expression": "COUNT_IF(`prioridad_por_monto` > 20)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "fuera_monto",
+                  "displayName": "Fuera del top 20 por monto"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Fuera del top 20 por monto"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 3,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "motivos_frec",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "revision",
+                  "fields": [
+                    {
+                      "name": "motivos",
+                      "expression": "`motivos`"
+                    },
+                    {
+                      "name": "motivos_frec",
+                      "expression": "COUNT(`ticket`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "motivos_frec",
+                  "displayName": "Tickets",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "format": {
+                    "type": "number-plain"
+                  }
+                },
+                "y": {
+                  "fieldName": "motivos",
+                  "displayName": "Motivos",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Combinaciones de motivos en la cola"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 16,
+            "width": 12,
+            "height": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "calidad",
+      "displayName": "Calidad y frescura",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layout": [
+        {
+          "widget": {
+            "name": "titulo_calidad",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Calidad y frescura\n\n",
+                "La fecha de negocio y la hora de publicación permiten comprobar si la cola quedó al día. Una fila en cuarentena puede representar un archivo completo."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "total_admitidos",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "calidad",
+                  "fields": [
+                    {
+                      "name": "total_admitidos",
+                      "expression": "MAX(`tickets_admitidos`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "total_admitidos",
+                  "displayName": "Tickets admitidos"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Tickets admitidos"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "total_avisos",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "calidad",
+                  "fields": [
+                    {
+                      "name": "total_avisos",
+                      "expression": "MAX(`tickets_con_advertencia`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "total_avisos",
+                  "displayName": "Admitidos con advertencia"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Admitidos con advertencia"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 2,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "total_criticos",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "calidad",
+                  "fields": [
+                    {
+                      "name": "total_criticos",
+                      "expression": "MAX(`registros_en_cuarentena`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "total_criticos",
+                  "displayName": "Registros en cuarentena"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Registros en cuarentena"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 2,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "control",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "calidad",
+                  "fields": [
+                    {
+                      "name": "ultimo_dia_ingestado",
+                      "expression": "`ultimo_dia_ingestado`"
+                    },
+                    {
+                      "name": "ultimo_dia_evaluado",
+                      "expression": "`ultimo_dia_evaluado`"
+                    },
+                    {
+                      "name": "refresco_pipeline",
+                      "expression": "`refresco_pipeline`"
+                    },
+                    {
+                      "name": "publicacion_modelo",
+                      "expression": "`publicacion_modelo`"
+                    },
+                    {
+                      "name": "pct_conciliacion_evaluable",
+                      "expression": "`pct_conciliacion_evaluable`"
+                    },
+                    {
+                      "name": "pct_cobertura_conciliacion",
+                      "expression": "`pct_cobertura_conciliacion`"
+                    },
+                    {
+                      "name": "tickets_sin_propina_observable",
+                      "expression": "`tickets_sin_propina_observable`"
+                    },
+                    {
+                      "name": "lineas_sin_item_id",
+                      "expression": "`lineas_sin_item_id`"
+                    },
+                    {
+                      "name": "llaves_duplicadas",
+                      "expression": "`llaves_duplicadas`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "ultimo_dia_ingestado",
+                    "displayName": "Último día del pipeline"
+                  },
+                  {
+                    "fieldName": "ultimo_dia_evaluado",
+                    "displayName": "Último día con candidatos"
+                  },
+                  {
+                    "fieldName": "refresco_pipeline",
+                    "displayName": "Refresco de calidad"
+                  },
+                  {
+                    "fieldName": "publicacion_modelo",
+                    "displayName": "Publicación del modelo"
+                  },
+                  {
+                    "fieldName": "pct_conciliacion_evaluable",
+                    "displayName": "Conciliación evaluable %"
+                  },
+                  {
+                    "fieldName": "pct_cobertura_conciliacion",
+                    "displayName": "Cobertura conciliación %"
+                  },
+                  {
+                    "fieldName": "tickets_sin_propina_observable",
+                    "displayName": "Tickets con propina desconocida"
+                  },
+                  {
+                    "fieldName": "lineas_sin_item_id",
+                    "displayName": "Líneas sin ID de artículo"
+                  },
+                  {
+                    "fieldName": "llaves_duplicadas",
+                    "displayName": "Llaves duplicadas"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Estado de la última actualización"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 12,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "excepciones_archivo",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "excepciones",
+                  "fields": [
+                    {
+                      "name": "dt",
+                      "expression": "`dt`"
+                    },
+                    {
+                      "name": "archivo",
+                      "expression": "`archivo`"
+                    },
+                    {
+                      "name": "estado",
+                      "expression": "`estado`"
+                    },
+                    {
+                      "name": "motivo",
+                      "expression": "`motivo`"
+                    },
+                    {
+                      "name": "registros",
+                      "expression": "`registros`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "dt",
+                    "displayName": "Fecha"
+                  },
+                  {
+                    "fieldName": "archivo",
+                    "displayName": "Archivo"
+                  },
+                  {
+                    "fieldName": "estado",
+                    "displayName": "Tratamiento"
+                  },
+                  {
+                    "fieldName": "motivo",
+                    "displayName": "Motivo"
+                  },
+                  {
+                    "fieldName": "registros",
+                    "displayName": "Registros"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Incidencias observadas en Bronze"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 12,
+            "height": 6
+          }
+        }
+      ]
+    },
+    {
+      "name": "simulacion",
+      "displayName": "Simulación",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layout": [
+        {
+          "widget": {
+            "name": "sim_titulo",
+            "multilineTextboxSpec": {
+              "lines": [
+                "## Datos simulados y abuso sembrado\n\n",
+                "Cada corrida agrega un día nuevo a partir de un día real del mismo día de la semana e inserta tickets con abuso conocido. ",
+                "Como sabemos cuáles son, medimos cuántos entran a la cola de 20 y cuántos entrarían si solo ordenáramos por monto."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "sim_dias",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "bitacora",
+                  "fields": [
+                    {
+                      "name": "sim_dias",
+                      "expression": "COUNT(`dt`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sim_dias",
+                  "displayName": "Días simulados"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Días simulados"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "sim_tickets",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "sembrados",
+                  "fields": [
+                    {
+                      "name": "sim_tickets",
+                      "expression": "COUNT(`ticket`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sim_tickets",
+                  "displayName": "Tickets sembrados"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Tickets sembrados"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "sim_en_cola",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "sembrados",
+                  "fields": [
+                    {
+                      "name": "sim_en_cola",
+                      "expression": "try_divide(SUM(`en_cola`), COUNT(`ticket`))"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sim_en_cola",
+                  "displayName": "Entran a la cola",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Entran a la cola"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "sim_en_monto",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "sembrados",
+                  "fields": [
+                    {
+                      "name": "sim_en_monto",
+                      "expression": "try_divide(SUM(`en_top_monto`), COUNT(`ticket`))"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sim_en_monto",
+                  "displayName": "Entrarían por monto",
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Entrarían por monto"
+              }
+            }
+          },
+          "position": {
+            "x": 9,
+            "y": 2,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "sim_patron",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "sembrados",
+                  "fields": [
+                    {
+                      "name": "patron",
+                      "expression": "`patron`"
+                    },
+                    {
+                      "name": "sim_patron",
+                      "expression": "try_divide(SUM(`en_cola`), COUNT(`ticket`))"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "sim_patron",
+                  "displayName": "% en la cola",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "format": {
+                    "type": "number-percent",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "patron",
+                  "displayName": "Patrón",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Detección por patrón"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "sim_volumen",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "operacion",
+                  "fields": [
+                    {
+                      "name": "dt",
+                      "expression": "`dt`"
+                    },
+                    {
+                      "name": "sim_volumen",
+                      "expression": "SUM(`tickets`)"
+                    },
+                    {
+                      "name": "origen",
+                      "expression": "`origen`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "dt",
+                  "displayName": "Fecha",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sim_volumen",
+                  "displayName": "Tickets",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "origen",
+                  "displayName": "origen",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Tickets por día: reales y simulados"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 5,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "tabla_sembrados",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "sembrados",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "dt",
+                      "expression": "`dt`"
+                    },
+                    {
+                      "name": "patron",
+                      "expression": "`patron`"
+                    },
+                    {
+                      "name": "ticket",
+                      "expression": "`ticket`"
+                    },
+                    {
+                      "name": "tienda",
+                      "expression": "`tienda`"
+                    },
+                    {
+                      "name": "monto_sembrado",
+                      "expression": "`monto_sembrado`"
+                    },
+                    {
+                      "name": "score",
+                      "expression": "`score`"
+                    },
+                    {
+                      "name": "prioridad_dia",
+                      "expression": "`prioridad_dia`"
+                    },
+                    {
+                      "name": "prioridad_por_monto",
+                      "expression": "`prioridad_por_monto`"
+                    },
+                    {
+                      "name": "motivos",
+                      "expression": "`motivos`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "dt",
+                    "displayName": "Fecha"
+                  },
+                  {
+                    "fieldName": "patron",
+                    "displayName": "Patrón"
+                  },
+                  {
+                    "fieldName": "ticket",
+                    "displayName": "Ticket"
+                  },
+                  {
+                    "fieldName": "tienda",
+                    "displayName": "Tienda"
+                  },
+                  {
+                    "fieldName": "monto_sembrado",
+                    "displayName": "Descuento sembrado"
+                  },
+                  {
+                    "fieldName": "score",
+                    "displayName": "Puntos / 7"
+                  },
+                  {
+                    "fieldName": "prioridad_dia",
+                    "displayName": "Prioridad del día"
+                  },
+                  {
+                    "fieldName": "prioridad_por_monto",
+                    "displayName": "Posición por monto"
+                  },
+                  {
+                    "fieldName": "motivos",
+                    "displayName": "Motivos"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Tickets sembrados y su lugar en la cola"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 12,
+            "height": 9
+          }
+        }
+      ]
+    },
+    {
+      "name": "filtros_globales",
+      "displayName": "Filtros",
+      "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
+      "layout": [
+        {
+          "widget": {
+            "name": "g_fecha",
+            "queries": [
+              {
+                "name": "g_fecha_operacion",
+                "query": {
+                  "datasetName": "operacion",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "dt",
+                      "expression": "`dt`"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "g_fecha_revision",
+                "query": {
+                  "datasetName": "revision",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "dt",
+                      "expression": "`dt`"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "g_fecha_sembrados",
+                "query": {
+                  "datasetName": "sembrados",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "dt",
+                      "expression": "`dt`"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "g_fecha_bitacora",
+                "query": {
+                  "datasetName": "bitacora",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "dt",
+                      "expression": "`dt`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-date-range-picker",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "dt",
+                    "queryName": "g_fecha_operacion",
+                    "displayName": "Fechas de negocio"
+                  },
+                  {
+                    "fieldName": "dt",
+                    "queryName": "g_fecha_revision",
+                    "displayName": "Fechas de negocio"
+                  },
+                  {
+                    "fieldName": "dt",
+                    "queryName": "g_fecha_sembrados",
+                    "displayName": "Fechas de negocio"
+                  },
+                  {
+                    "fieldName": "dt",
+                    "queryName": "g_fecha_bitacora",
+                    "displayName": "Fechas de negocio"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Fechas de negocio"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "g_tienda",
+            "queries": [
+              {
+                "name": "g_tienda_operacion",
+                "query": {
+                  "datasetName": "operacion",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "tienda",
+                      "expression": "`tienda`"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "g_tienda_revision",
+                "query": {
+                  "datasetName": "revision",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "tienda",
+                      "expression": "`tienda`"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "g_tienda_sembrados",
+                "query": {
+                  "datasetName": "sembrados",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "tienda",
+                      "expression": "`tienda`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "tienda",
+                    "queryName": "g_tienda_operacion",
+                    "displayName": "Tienda"
+                  },
+                  {
+                    "fieldName": "tienda",
+                    "queryName": "g_tienda_revision",
+                    "displayName": "Tienda"
+                  },
+                  {
+                    "fieldName": "tienda",
+                    "queryName": "g_tienda_sembrados",
+                    "displayName": "Tienda"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Tienda"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "g_canal",
+            "queries": [
+              {
+                "name": "g_canal_operacion",
+                "query": {
+                  "datasetName": "operacion",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "canal",
+                      "expression": "`canal`"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "g_canal_revision",
+                "query": {
+                  "datasetName": "revision",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "canal",
+                      "expression": "`canal`"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "g_canal_sembrados",
+                "query": {
+                  "datasetName": "sembrados",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "canal",
+                      "expression": "`canal`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "canal",
+                    "queryName": "g_canal_operacion",
+                    "displayName": "Canal"
+                  },
+                  {
+                    "fieldName": "canal",
+                    "queryName": "g_canal_revision",
+                    "displayName": "Canal"
+                  },
+                  {
+                    "fieldName": "canal",
+                    "queryName": "g_canal_sembrados",
+                    "displayName": "Canal"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Canal"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 4,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "g_pago",
+            "queries": [
+              {
+                "name": "g_pago_operacion",
+                "query": {
+                  "datasetName": "operacion",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "tipo_pago",
+                      "expression": "`tipo_pago`"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "g_pago_revision",
+                "query": {
+                  "datasetName": "revision",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "tipo_pago",
+                      "expression": "`tipo_pago`"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "g_pago_sembrados",
+                "query": {
+                  "datasetName": "sembrados",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "tipo_pago",
+                      "expression": "`tipo_pago`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "tipo_pago",
+                    "queryName": "g_pago_operacion",
+                    "displayName": "Pago"
+                  },
+                  {
+                    "fieldName": "tipo_pago",
+                    "queryName": "g_pago_revision",
+                    "displayName": "Pago"
+                  },
+                  {
+                    "fieldName": "tipo_pago",
+                    "queryName": "g_pago_sembrados",
+                    "displayName": "Pago"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Pago"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 6,
+            "width": 1,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "g_origen",
+            "queries": [
+              {
+                "name": "g_origen_operacion",
+                "query": {
+                  "datasetName": "operacion",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "origen",
+                      "expression": "`origen`"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "g_origen_revision",
+                "query": {
+                  "datasetName": "revision",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "origen",
+                      "expression": "`origen`"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "g_origen_sembrados",
+                "query": {
+                  "datasetName": "sembrados",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "origen",
+                      "expression": "`origen`"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "g_origen_bitacora",
+                "query": {
+                  "datasetName": "bitacora",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "origen",
+                      "expression": "`origen`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "origen",
+                    "queryName": "g_origen_operacion",
+                    "displayName": "Datos (real / simulado)"
+                  },
+                  {
+                    "fieldName": "origen",
+                    "queryName": "g_origen_revision",
+                    "displayName": "Datos (real / simulado)"
+                  },
+                  {
+                    "fieldName": "origen",
+                    "queryName": "g_origen_sembrados",
+                    "displayName": "Datos (real / simulado)"
+                  },
+                  {
+                    "fieldName": "origen",
+                    "queryName": "g_origen_bitacora",
+                    "displayName": "Datos (real / simulado)"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Datos (real / simulado)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 8,
+            "width": 1,
+            "height": 2
+          }
+        }
+      ]
+    }
+  ]
+}
