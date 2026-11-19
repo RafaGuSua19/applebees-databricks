@@ -12,21 +12,21 @@ Duración propuesta de **4 minutos y 30 segundos**. La exposición en inglés si
 
 ## 1:15–2:05 · What the model does
 
-> For each ticket, the model looks back 28 days and compares its discount rate with checks from the same store, channel and payment type. It uses the chain’s matching channel and payment type when the local sample is too small. Then it adds points for visible authorization or closure signals. In this example, the ticket is third by dollar amount and first in the queue. Its rate is 40% versus a 10% reference, it has a recorded self-approval and it stayed open more than four hours.
+> The model compares each ticket’s discount rate with the previous 28 days for the same store, channel and payment type. When the store sample is small, it uses the chain’s matching channel and payment type. It also adds points for signals such as self-approval or a ticket left open for hours. For manager and walkout discounts, the model compares the employee’s last seven days with their own weekly average over the previous four weeks. That signal picks up sharp changes in behavior.
 
 ## 2:05–2:55 · Ingestion and data quality
 
-> New daily files go into a Unity Catalog volume. Auto Loader tracks files that already ran. We keep tickets that have a new field, a missing item ID or an unknown tip when the rest of the record is usable. For example, a missing tip stays unknown while the sale and discount contribute to their metrics. A record with a critical issue goes into quarantine with its original evidence. Quality checks run before we publish the next queue. In our two-file replay, Bronze moved from one row to three, and a third run kept three. The ticket with warnings stayed usable.
+> New daily files go into a Unity Catalog volume. Auto Loader tracks processed files. We keep tickets with a new field, a missing item ID or an unknown tip when the rest of the record is usable. Critical issues go into quarantine with the original record. Quality checks run before the queue is published. All twelve simulated days passed the quality gate. The five held-out runs took a median of four minutes and nineteen seconds from generation to publication.
 
-## 2:55–3:45 · Dashboard demo
+## 2:55–3:45 · Dashboard demo and results
 
-> We can start on Discounts and filter by business date, store, channel or payment. Then we move to Review Queue and read one ticket’s reasons and reference rate. Across the last 21 historical days, 371 of 420 picks differed from the amount-only ranking, under the same daily capacity. Quality and Freshness shows which business day reached the pipeline, when scoring was published and how many records were retained with warnings or quarantined.
+> We start on Discounts and filter by date, store, channel or payment. In Review Queue, we open one ticket and read its reasons and reference rate. On the last 21 real days, most tickets in the queue ranked outside the top 20 by amount. On the seven calibration days, the queue found 45 of 56 seeded employee-days, or 80 percent. That means at least one seeded ticket for that employee made the queue that day. Ranking by amount found 24, and the first version found 14.
 
-Abrir el dashboard de Databricks. En vivo, abrir **Descuentos → Cola de revisión → Calidad y frescura**. Filtrar al **20 de agosto de 2026** en Cola de revisión. Hay 20 tickets con motivos y referencia contextual. La fecha del negocio y la hora de procesamiento cuentan cosas diferentes. El caso de 40% frente a 10% es la alternativa ilustrativa si el warehouse tarda en cargar.
+Abrir **Descuentos → Cola de revisión → Simulación** en Databricks. En Cola de revisión elegir el **27 de agosto de 2026**, el último día de calibración. En Simulación quitar el filtro de fecha y elegir **Calibración** para mostrar los siete días del 21 al 27 de agosto. Si se agregaron más días de calibración, elegir también ese rango. Para mostrar el ensayo independiente, quitar el filtro de fecha y cambiar a **Prueba**.
 
 ## 3:45–4:30 · Final scope and success measure
 
-> At the final presentation, we will show the ingestion replay, the quality evidence, the ticket model and the dashboard. We’ll also compare our queue with a simple ranking by discount amount, under the same review capacity. In a pilot, reviewers will record which cases were actionable, legitimate or had insufficient evidence. Our success measure is actionable cases per 20 reviews.
+> We then kept the rules fixed and tested five days with different employees, stores and patterns. Both versions found 8 of 37 seeded employee-days, or 22 percent. Ranking by amount found 4. Seven of the eight hits were card-paid walkouts. For the final, we’ll show the daily upload, the updated queue and the results for both cohorts. In a pilot, reviewers will record which cases were actionable, legitimate or needed more evidence. Our success measure is actionable cases per 20 reviews.
 
 ## Si preguntan
 
@@ -36,10 +36,14 @@ Abrir el dashboard de Databricks. En vivo, abrir **Descuentos → Cola de revisi
 | ¿Por qué una ventana de 28 días? | Permite actualizar un patrón reciente y cubre cuatro semanas calendario. La ventana, mínimos y puntos se calibran con etiquetas operativas. |
 | ¿Qué pasa si la tienda tiene pocos ejemplos? | Usa la cadena para el mismo canal y pago si alcanza el mínimo. Si tampoco alcanza, muestra la falta de referencia y sigue reportando los controles observados. |
 | ¿Se entrena con información del futuro? | Cada tasa de referencia termina el día anterior al ticket. El score se puede recalcular con una llegada tardía de ese historial. |
+| ¿Por qué se agregó la señal del empleado? | La simulación mostró que el abuso en efectivo no se veía: en efectivo lo normal ya es ~58 % de descuento, así que un 70 % no parece raro. El abuso es repetitivo, y eso sí se ve en la semana del empleado. |
+| ¿No se llena la cola con un solo empleado? | No: entran máximo 2 tickets por empleado al día. El primer ticket lleva al revisor al resto. |
+| ¿Los datos simulados son inventados? | Son tickets reales de un día equivalente con fechas recorridas. Solo los descuentos sembrados son inventados, y sabemos exactamente cuáles son. |
+| ¿Qué significa el 80 %? | La cola detectó 45 de 56 empleado-días sembrados en calibración. Un día cuenta si al menos un ticket sembrado del empleado entró a la cola. El ensayo de prueba mide cobertura en otros patrones simulados. El piloto con revisores mide cuántos casos son accionables. |
 | ¿Dónde quedan los llamados tickets malos? | En Bronze con JSON, archivo y motivo. Las advertencias recuperables siguen a Silver y aparecen en el dashboard. |
 | ¿Por qué efectivo no suma puntos directamente? | El pago define el grupo de referencia. Cada ticket en efectivo se compara con su contexto de efectivo. |
 | ¿Qué pasa si se reejecuta el job? | Auto Loader recuerda archivos. Si los insumos son los mismos, el ranking y los importes se conservan. La marca de publicación sí cambia. |
 | ¿Qué significa el monto de la cola? | Es el descuento registrado en los tickets de esa selección. Un impacto económico requeriría una revisión adicional. |
-| ¿Qué sigue después de esta entrega? | Piloto humano con presupuesto fijo, prueba de una llegada nueva, monitoreo de frescura y ajuste de umbrales. |
+| ¿Qué sigue después de esta entrega? | Piloto con revisores, monitoreo de frescura y validación de señales para los patrones con baja cobertura. |
 
 [Documentación técnica y alcance de la entrega](fase3.md)

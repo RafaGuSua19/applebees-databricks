@@ -5,13 +5,15 @@ from decimal import Decimal
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src" / "simulacion"))
-from reglas_simulacion import (PATRONES, aplicar_abuso, asignar_patrones, elegir_empleados,
-                               mover_fecha, mover_ticket, rng_para)
+from reglas_simulacion import (PATRONES, PATRONES_PRUEBA, TODOS_LOS_PATRONES, aplicar_abuso,
+                               asignar_patrones, descuentos_requeridos, elegir_empleados, mover_fecha,
+                               mover_ticket, probabilidad_siembra, rng_para)
 
 EFECTIVO = {"Amount": 0.0, "EmployeeId": 1, "Gratuity": 0.0, "IsCashDebit": False, "IsCreditCard": False,
             "IsGiftCard": False, "IsGiftCert": False, "IsNonPOS": False, "IsPettyCash": False,
             "PayCatName": "CASH", "PayCatNo": 1, "PaymentCategoryId": 1, "PosSourceId": 1}
-IDS = {"MANAGER": ("MANAGER", 101), "WALKOUT": ("WALKOUT", 102)}
+IDS = {"MANAGER": ("MANAGER", 101), "WALKOUT": ("WALKOUT", 102), "SERVERERR": ("SERVERERR", 103),
+       "EMP 50": ("EMP 50", 104)}
 
 
 def ticket():
@@ -48,7 +50,7 @@ class SimulacionTests(unittest.TestCase):
         self.assertEqual(t["ItemsSold"][0]["OrderTime"][:10], "2026-08-21")
 
     def test_todos_los_patrones_concilian(self):
-        for patron in PATRONES:
+        for patron in TODOS_LOS_PATRONES:
             for semilla in range(30):
                 with self.subTest(patron=patron, semilla=semilla):
                     t = ticket()
@@ -104,6 +106,39 @@ class SimulacionTests(unittest.TestCase):
         self.assertEqual(a, elegir_empleados(list(reversed(candidatos)), 4, rng_para("x")))
         self.assertEqual(len({loc for _, loc in a}), 4)
         self.assertEqual([p for *_, p in asignar_patrones(a)], list(PATRONES))
+
+    def test_cohorte_prueba(self):
+        candidatos = [(e, e % 12) for e in range(1, 80)]
+        base = elegir_empleados(candidatos, 4, rng_para("x"))
+        usados = {loc for _, loc in base}
+        prueba = elegir_empleados(candidatos, 4, rng_para("x", "prueba"), excluir_tiendas=usados)
+        self.assertFalse(usados & {loc for _, loc in prueba})
+        self.assertEqual([p for *_, p in asignar_patrones(prueba, "prueba")], list(PATRONES_PRUEBA))
+        self.assertFalse(set(PATRONES) & set(PATRONES_PRUEBA))
+        self.assertEqual(set(descuentos_requeridos()), set(IDS))
+        distintos = elegir_empleados([(e, l) for e in range(8) for l in range(20)], 8, rng_para("x"))
+        self.assertEqual(len({e for e, _ in distintos}), 8)
+        self.assertEqual(len({l for _, l in distintos}), 8)
+
+    def test_senales_cohorte_prueba(self):
+        t = ticket()
+        aplicar_abuso(t, 77, "error_servidor", EFECTIVO, IDS, 60, rng_para(1))
+        self.assertEqual(t["Discounts"][-1]["DiscountName"], "SERVERERR")
+        self.assertEqual(t["Payments"][0]["PayCatName"], "CASH")
+        t = ticket()
+        monto = aplicar_abuso(t, 77, "emp50_clientes", EFECTIVO, IDS, 60, rng_para(1))
+        self.assertEqual(monto, Decimal("15.50"))                       # 50 % de la base de 31
+        self.assertEqual(t["Payments"][0]["PayCatName"], "VISA")
+        t = ticket()
+        aplicar_abuso(t, 77, "walkout_tarjeta", EFECTIVO, IDS, 60, rng_para(1))
+        self.assertEqual(t["Discounts"][-1]["ManagerId"], 0)
+        self.assertTrue(t["Payments"][0]["IsCreditCard"])
+
+    def test_frecuencia_por_patron(self):
+        self.assertAlmostEqual(probabilidad_siembra("efectivo_manager", 15, 300), 0.05)
+        self.assertAlmostEqual(probabilidad_siembra("goteo_manager", 15, 300), 0.0075)
+        self.assertLess(probabilidad_siembra("goteo_manager", 15, 300),
+                        probabilidad_siembra("error_servidor", 15, 300))
 
 
 if __name__ == "__main__":

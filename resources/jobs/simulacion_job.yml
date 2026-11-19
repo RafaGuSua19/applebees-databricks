@@ -7,6 +7,9 @@ targets:
         simulacion_job:
           name: applebees_simulacion
           max_concurrent_runs: 1
+          parameters:
+            - name: cohorte
+              default: base
           # Otros integrantes pueden lanzar la simulación; el job corre con la identidad del dueño.
           permissions:
             - user_name: a01645436@tec.mx

@@ -9,12 +9,32 @@ from decimal import Decimal
 CENTAVO = Decimal("0.01")
 
 # Cada patrón combina señales distintas. El patrón sutil sirve para medir sensibilidad en tarjeta.
+# frecuencia multiplica tickets_por_empleado: 1.0 son ~15 tickets al día.
 PATRONES = {
-    "efectivo_manager":    dict(descuento="MANAGER", pct=(0.50, 0.90), efectivo=True,  gerente="otro",    horas=None),
-    "walkout_sin_gerente": dict(descuento="WALKOUT", pct=(0.60, 0.90), efectivo=True,  gerente="ninguno", horas=None),
-    "autoaprobado_4h":     dict(descuento="MANAGER", pct=(0.40, 0.80), efectivo=True,  gerente="mismo",   horas=(4.2, 6.0)),
-    "sutil":               dict(descuento="MANAGER", pct=(0.15, 0.30), efectivo=False, gerente="otro",    horas=None),
+    "efectivo_manager":    dict(descuento="MANAGER", pct=(0.50, 0.90), efectivo=True,  gerente="otro",    horas=None, frecuencia=1.0),
+    "walkout_sin_gerente": dict(descuento="WALKOUT", pct=(0.60, 0.90), efectivo=True,  gerente="ninguno", horas=None, frecuencia=1.0),
+    "autoaprobado_4h":     dict(descuento="MANAGER", pct=(0.40, 0.80), efectivo=True,  gerente="mismo",   horas=(4.2, 6.0), frecuencia=1.0),
+    "sutil":               dict(descuento="MANAGER", pct=(0.15, 0.30), efectivo=False, gerente="otro",    horas=None, frecuencia=1.0),
 }
+
+# Cohorte de prueba: patrones que no se usaron para calibrar los umbrales de la v2.
+#   goteo_manager       -> pocos MANAGER al día, cerca del umbral semanal de la v2.
+#   walkout_tarjeta     -> WALKOUT sin gerente pagado con tarjeta, también poco frecuente.
+#   error_servidor      -> el abuso se esconde en un código de error (SERVERERR), no en MANAGER/WALKOUT.
+#   emp50_clientes      -> descuento de empleado al 50 % aplicado a clientes con tarjeta.
+PATRONES_PRUEBA = {
+    "goteo_manager":   dict(descuento="MANAGER",   pct=(0.35, 0.60), efectivo=True,  gerente="otro",    horas=None, frecuencia=0.15),
+    "walkout_tarjeta": dict(descuento="WALKOUT",   pct=(0.50, 0.80), efectivo=False, gerente="ninguno", horas=None, frecuencia=0.20),
+    "error_servidor":  dict(descuento="SERVERERR", pct=(0.40, 0.70), efectivo=True,  gerente="otro",    horas=None, frecuencia=0.70),
+    "emp50_clientes":  dict(descuento="EMP 50",    pct=(0.50, 0.50), efectivo=False, gerente="otro",    horas=None, frecuencia=0.50),
+}
+
+COHORTES = {"base": PATRONES, "prueba": PATRONES_PRUEBA}
+TODOS_LOS_PATRONES = {**PATRONES, **PATRONES_PRUEBA}
+
+
+def descuentos_requeridos():
+    return sorted({p["descuento"] for p in TODOS_LOS_PATRONES.values()})
 
 CAMPOS_FECHA = ("BusinessDate", "OpenTime", "CloseTime")
 
@@ -93,7 +113,7 @@ def aplicar_abuso(t, empleado, patron, plantilla_efectivo, ids_descuento, gerent
     """Agrega un descuento de ticket con el patrón indicado y ajusta impuestos y pagos para que
     el ticket siga conciliando: paid = sold - disc_check + tax + tip.
     Regresa el monto sembrado o None si el ticket no se puede usar."""
-    p = PATRONES[patron]
+    p = TODOS_LOS_PATRONES[patron]
     base = base_descontable(t)
     if base < 10 or p["descuento"] not in ids_descuento:
         return None
@@ -126,21 +146,28 @@ def aplicar_abuso(t, empleado, patron, plantilla_efectivo, ids_descuento, gerent
     return monto
 
 
-def asignar_patrones(empleados):
-    """Reparte los patrones en orden entre los empleados elegidos (ya barajados)."""
-    nombres = list(PATRONES)
+def asignar_patrones(empleados, cohorte="base"):
+    """Reparte los patrones de la cohorte en orden entre los empleados elegidos (ya barajados)."""
+    nombres = list(COHORTES[cohorte])
     return [(emp, loc, nombres[i % len(nombres)]) for i, (emp, loc) in enumerate(empleados)]
 
 
-def elegir_empleados(candidatos, n, rng):
-    """candidatos: lista de (EmployeeId, LocationId). Uno por tienda para no mezclar señales."""
+def probabilidad_siembra(patron, tickets_por_empleado, tickets_tienda):
+    """Probabilidad de que un ticket de la tienda se use para sembrar abuso ese día."""
+    return tickets_por_empleado * TODOS_LOS_PATRONES[patron]["frecuencia"] / max(tickets_tienda, 1)
+
+
+def elegir_empleados(candidatos, n, rng, excluir_tiendas=()):
+    """candidatos: lista de (EmployeeId, LocationId). Uno por tienda para no mezclar señales.
+    excluir_tiendas deja fuera las tiendas de cohortes anteriores."""
     candidatos = sorted(candidatos)
     rng.shuffle(candidatos)
-    elegidos, tiendas = [], set()
+    elegidos, tiendas, empleados = [], set(excluir_tiendas), set()
     for emp, loc in candidatos:
-        if loc not in tiendas:
+        if loc not in tiendas and emp not in empleados:
             elegidos.append((emp, loc))
             tiendas.add(loc)
+            empleados.add(emp)
         if len(elegidos) == n:
             break
     return elegidos

@@ -8,6 +8,10 @@
 # Acciones:
 #   preparar -> crea el volumen y el esquema de demo y copia catálogos + los últimos N días reales.
 #   generar  -> escribe los siguientes N días simulados y registra la bitácora.
+# Cohortes:
+#   base   -> los 8 empleados y 4 patrones con los que se calibró la v2.
+#   prueba -> 8 empleados nuevos, en otras tiendas, con 4 patrones que la v2 no vio. Los empleados
+#             de la cohorte base dejan de sembrarse, así que un día de prueba solo mide casos nuevos.
 # La fuente original solo se lee.
 import json
 import os
@@ -15,8 +19,8 @@ from datetime import date, timedelta
 
 from pyspark.sql import functions as F
 
-from reglas_simulacion import (aplicar_abuso, asignar_patrones, elegir_empleados, mover_ticket,
-                               rng_para, tiene_venta)
+from reglas_simulacion import (COHORTES, aplicar_abuso, asignar_patrones, descuentos_requeridos,
+                               elegir_empleados, mover_ticket, probabilidad_siembra, rng_para, tiene_venta)
 
 dbutils.widgets.dropdown("accion", "generar", ["preparar", "generar"])
 dbutils.widgets.text("origen", "/Volumes/workspace/default/applebees")
@@ -28,6 +32,7 @@ dbutils.widgets.text("n_dias", "1")
 dbutils.widgets.text("n_empleados", "8")
 dbutils.widgets.text("tickets_por_empleado", "15")
 dbutils.widgets.text("semilla", "2026")
+dbutils.widgets.dropdown("cohorte", "base", list(COHORTES))
 
 ACCION = dbutils.widgets.get("accion")
 ORIGEN = dbutils.widgets.get("origen").rstrip("/")
@@ -40,6 +45,7 @@ N_DIAS = int(dbutils.widgets.get("n_dias"))
 N_EMPLEADOS = int(dbutils.widgets.get("n_empleados"))
 TICKETS_POR_EMPLEADO = int(dbutils.widgets.get("tickets_por_empleado"))
 SEMILLA = dbutils.widgets.get("semilla")
+COHORTE = dbutils.widgets.get("cohorte")
 
 TABLA_VERDAD = f"{ESQUEMA}.sim_fraude_sembrado"
 TABLA_BITACORA = f"{ESQUEMA}.sim_bitacora"
@@ -51,6 +57,8 @@ if (ORIGEN != "/Volumes/workspace/default/applebees" or
     raise ValueError("El simulador usa el origen oficial y su volumen y esquema dedicados applebees_demo")
 if min(DIAS_HISTORIA, N_DIAS, N_EMPLEADOS, TICKETS_POR_EMPLEADO) < 1:
     raise ValueError("Los días, empleados y tickets por empleado deben ser positivos")
+if COHORTE not in COHORTES:
+    raise ValueError("cohorte debe ser base o prueba")
 
 ESTRUCTURA_BITACORA = ("dt date, dia_referencia date, archivo string, tickets_referencia long, "
                       "tickets_generados long, tickets_con_abuso long, monto_sembrado double")
@@ -91,6 +99,10 @@ def preparar():
     spark.sql("CREATE VOLUME IF NOT EXISTS workspace.default.applebees_demo")
     spark.sql(f"CREATE TABLE IF NOT EXISTS {TABLA_BITACORA} ({ESTRUCTURA_BITACORA}, generado_en timestamp) USING DELTA")
     spark.sql(f"CREATE TABLE IF NOT EXISTS {TABLA_TICKETS} ({ESTRUCTURA_TICKETS}) USING DELTA")
+    spark.sql(f"""CREATE TABLE IF NOT EXISTS {TABLA_VERDAD} (
+        EmployeeId BIGINT, LocationId BIGINT, patron STRING, fecha_inicio DATE, cohorte STRING,
+        score_inicial INT, nivel_inicial STRING, creado_en TIMESTAMP) USING DELTA""")
+    asegurar_columna_cohorte()
     if not existe(f"{DESTINO}/dimensions"):
         if not dbutils.fs.cp(f"{ORIGEN}/dimensions", f"{DESTINO}/dimensions", recurse=True):
             raise OSError("Falló la copia de los catálogos de referencia")
@@ -111,31 +123,54 @@ def preparar():
 
 # COMMAND ----------
 
-def empleados_sembrados(primer_dia):
-    """Crea la tabla de verdad la primera vez; después siempre usa los mismos empleados."""
+def asegurar_columna_cohorte():
+    """Las tablas creadas antes de las cohortes no tienen la columna; sus filas son la cohorte base."""
     if not spark.catalog.tableExists(TABLA_VERDAD):
+        return
+    if "cohorte" not in spark.table(TABLA_VERDAD).columns:
+        spark.sql(f"ALTER TABLE {TABLA_VERDAD} ADD COLUMN cohorte string")
+    if spark.table(TABLA_VERDAD).where("cohorte IS NULL").take(1):
+        spark.sql(f"UPDATE {TABLA_VERDAD} SET cohorte = 'base' WHERE cohorte IS NULL")
+
+
+def empleados_sembrados(primer_dia):
+    """Crea la cohorte la primera vez que se pide; después siempre usa los mismos empleados.
+    Regresa solo los empleados de la cohorte activa."""
+    asegurar_columna_cohorte()
+    previos = spark.table(TABLA_VERDAD).collect() if spark.catalog.tableExists(TABLA_VERDAD) else []
+    if not any(r.cohorte == COHORTE for r in previos):
+        usados = {r.EmployeeId for r in previos}
         candidatos = spark.sql(f"""
             SELECT EmployeeId, LocationId FROM {ESQUEMA}.gold_riesgo_empleados
             WHERE nivel_riesgo = 'Bajo' AND lineas >= 300""").collect()
-        elegidos = elegir_empleados([(r.EmployeeId, r.LocationId) for r in candidatos],
-                                    N_EMPLEADOS, rng_para(SEMILLA, "empleados"))
-        filas = [(e, l, p, primer_dia) for e, l, p in asignar_patrones(elegidos)]
-        (spark.createDataFrame(filas, "EmployeeId long, LocationId long, patron string, fecha_inicio date")
+        # La cohorte base conserva su semilla original para reproducir la simulación ya publicada.
+        rng = rng_para(SEMILLA, "empleados") if COHORTE == "base" else rng_para(SEMILLA, "empleados", COHORTE)
+        elegidos = elegir_empleados([(r.EmployeeId, r.LocationId) for r in candidatos if r.EmployeeId not in usados],
+                                    N_EMPLEADOS, rng, excluir_tiendas={r.LocationId for r in previos})
+        if len(elegidos) != N_EMPLEADOS:
+            raise ValueError(f"Cohorte {COHORTE}: se pidieron {N_EMPLEADOS} empleados de tiendas distintas "
+                             f"y hay {len(elegidos)} elegibles")
+        filas = [(e, l, p, primer_dia, COHORTE) for e, l, p in asignar_patrones(elegidos, COHORTE)]
+        (spark.createDataFrame(filas, "EmployeeId long, LocationId long, patron string, fecha_inicio date, cohorte string")
          .join(spark.table(f"{ESQUEMA}.gold_riesgo_empleados")
                .select("EmployeeId", "LocationId", F.col("score_riesgo").alias("score_inicial"),
                        F.col("nivel_riesgo").alias("nivel_inicial")), ["EmployeeId", "LocationId"])
          .withColumn("creado_en", F.current_timestamp())
-         .write.saveAsTable(TABLA_VERDAD))
-    return {r.LocationId: (r.EmployeeId, r.patron) for r in spark.table(TABLA_VERDAD).collect()}
+         .write.mode("append").option("mergeSchema", "true").saveAsTable(TABLA_VERDAD))
+        print(f"Cohorte {COHORTE}: {len(filas)} empleados nuevos desde {primer_dia}.")
+    return {r.LocationId: (r.EmployeeId, r.patron)
+            for r in spark.table(TABLA_VERDAD).filter(F.col("cohorte") == COHORTE).collect()}
 
 
-def catalogos_descuento(sembrados):
+def catalogos_descuento():
+    nombres = ", ".join(f"'{n}'" for n in descuentos_requeridos())
     ids = {r.DiscountName: (r.DiscountName, r.DiscountId) for r in spark.sql(f"""
         SELECT DiscountName, max_by(DiscountId, n) AS DiscountId FROM (
           SELECT DiscountName, DiscountId, count(*) AS n FROM {ESQUEMA}.silver_discounts
-          WHERE DiscountName IN ('MANAGER', 'WALKOUT') GROUP BY ALL)
+          WHERE DiscountName IN ({nombres}) GROUP BY ALL)
         GROUP BY DiscountName""").collect()}
-    excluir = ",".join(str(e) for e, _ in sembrados.values()) or "0"
+    # El gerente que autoriza nunca es un empleado sembrado de ninguna cohorte.
+    excluir = ",".join(str(r.EmployeeId) for r in spark.table(TABLA_VERDAD).collect()) or "0"
     gerentes = {r.LocationId: r.ManagerId for r in spark.sql(f"""
         SELECT LocationId, max_by(ManagerId, n) AS ManagerId FROM (
           SELECT LocationId, ManagerId, count(*) AS n FROM {ESQUEMA}.silver_discounts
@@ -172,7 +207,8 @@ def generar_dia(dia, reales, sembrados, ids_descuento, gerentes):
             if r.random() > conservar.get(loc, 1.0):
                 continue
             mover_ticket(t, dias)
-            if loc in sembrados and tiene_venta(t) and r.random() < TICKETS_POR_EMPLEADO / por_tienda[loc]:
+            if loc in sembrados and tiene_venta(t) and r.random() < probabilidad_siembra(
+                    sembrados[loc][1], TICKETS_POR_EMPLEADO, por_tienda[loc]):
                 emp, patron = sembrados[loc]
                 monto = aplicar_abuso(t, emp, patron, plantilla_efectivo, ids_descuento, gerentes.get(loc), r)
                 if monto is not None:
@@ -210,10 +246,12 @@ def generar():
         raise RuntimeError(f"{DESTINO} no tiene días: correr primero accion=preparar")
     siguiente = max(actuales) + timedelta(days=1)
     sembrados = empleados_sembrados(siguiente)
-    ids_descuento, gerentes = catalogos_descuento(sembrados)
-    faltan = {"MANAGER", "WALKOUT"} - set(ids_descuento)
+    ids_descuento, gerentes = catalogos_descuento()
+    faltan = {p for _, p in sembrados.values() if COHORTES[COHORTE][p]["descuento"] not in ids_descuento}
+    if faltan and COHORTE == "prueba":
+        raise ValueError(f"Faltan códigos de descuento en silver_discounts para {sorted(faltan)}")
     if faltan:
-        print(f"Aviso: no se encontró el descuento {faltan} en silver_discounts; esos patrones no se aplican.")
+        print(f"Aviso: no se aplicarán los patrones con códigos de descuento faltantes: {sorted(faltan)}")
     for k in range(N_DIAS):
         generar_dia(siguiente + timedelta(days=k), reales, sembrados, ids_descuento, gerentes)
 
@@ -234,10 +272,10 @@ else:
 
 if spark.catalog.tableExists(TABLA_VERDAD):
     display(spark.sql(f"""
-        SELECT s.patron, s.EmployeeId, s.LocationId, s.nivel_inicial, s.score_inicial,
+        SELECT s.cohorte, s.patron, s.EmployeeId, s.LocationId, s.nivel_inicial, s.score_inicial,
                r.nivel_riesgo AS nivel_actual, r.score_riesgo AS score_actual,
                round(r.veces_vs_tienda, 2) AS veces_vs_tienda, round(r.pct_efectivo, 2) AS pct_efectivo,
                round(r.pct_manager_walkout, 2) AS pct_manager_walkout, r.n_autoaprobados, r.tickets_4h_con_desc
         FROM {TABLA_VERDAD} s
         LEFT JOIN {ESQUEMA}.gold_riesgo_empleados r USING (EmployeeId, LocationId)
-        ORDER BY r.score_riesgo DESC"""))
+        ORDER BY s.cohorte, r.score_riesgo DESC"""))

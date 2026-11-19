@@ -69,13 +69,19 @@
       "name": "sembrados",
       "displayName": "Tickets con abuso sembrado",
       "queryLines": [
-        "SELECT t.dt, t.patron, CAST(t.CheckId AS STRING) AS ticket,\n",
+        "SELECT t.dt, t.patron, CASE WHEN v.cohorte = 'prueba' THEN 'Prueba' ELSE 'Calibración' END AS cohorte, CAST(t.CheckId AS STRING) AS ticket,\n",
         "       CONCAT(COALESCE(l.Tienda, 'Tienda sin nombre'), ' · ', t.LocationId) AS tienda,\n",
         "       COALESCE(c.Canal, 'Sin canal') AS canal, k.tipo_pago, 'Simulado' AS origen,\n",
         "       round(t.monto_sembrado, 2) AS monto_sembrado, r.score, r.prioridad_dia, r.prioridad_por_monto, r.motivos,\n",
         "       CASE WHEN r.prioridad_dia <= 20 AND r.score >= 2 THEN 1 ELSE 0 END AS en_cola,\n",
-        "       CASE WHEN r.prioridad_por_monto <= 20 THEN 1 ELSE 0 END AS en_top_monto\n",
+        "       CASE WHEN r.prioridad_por_monto <= 20 THEN 1 ELSE 0 END AS en_top_monto,\n",
+        "       CASE WHEN r.prioridad_dia <= 20 AND r.score >= 2 THEN 'En la cola'\n",
+        "            WHEN r.score IS NULL THEN 'Sin puntuar'\n",
+        "            WHEN r.score < 2 THEN 'Menos de 2 puntos'\n",
+        "            WHEN r.orden_empleado > 2 THEN 'Tope de 2 tickets por empleado'\n",
+        "            ELSE 'Fuera de los 20 del día' END AS situacion\n",
         "FROM sim_tickets_sembrados t\n",
+        "LEFT JOIN sim_fraude_sembrado v ON v.EmployeeId = t.EmployeeId AND v.LocationId = t.LocationId\n",
         "LEFT JOIN gold_revision_descuentos r ON r.dt = t.dt AND r.LocationId = t.LocationId AND r.CheckId = t.CheckId\n",
         "LEFT JOIN silver_locations l ON l.LocationId = t.LocationId\n",
         "LEFT JOIN silver_checks k ON k.dt = t.dt AND k.LocationId = t.LocationId AND k.CheckId = t.CheckId\n",
@@ -86,8 +92,33 @@
       "name": "bitacora",
       "displayName": "Días simulados",
       "queryLines": [
-        "SELECT dt, 'Simulado' AS origen, dia_referencia, tickets_generados, tickets_con_abuso, monto_sembrado, generado_en\n",
-        "FROM sim_bitacora"
+        "WITH cohortes AS (\n",
+        "  SELECT DISTINCT t.dt, CASE WHEN v.cohorte = 'prueba' THEN 'Prueba' ELSE 'Calibración' END AS cohorte\n",
+        "  FROM sim_tickets_sembrados t\n",
+        "  LEFT JOIN sim_fraude_sembrado v ON v.EmployeeId = t.EmployeeId AND v.LocationId = t.LocationId\n",
+        ")\n",
+        "SELECT b.dt, 'Simulado' AS origen, c.cohorte, b.dia_referencia, b.tickets_generados, b.tickets_con_abuso,\n",
+        "       b.monto_sembrado, b.generado_en\n",
+        "FROM sim_bitacora b LEFT JOIN cohortes c ON b.dt = c.dt\n"
+      ]
+    },
+    {
+      "name": "empleado_dias",
+      "displayName": "Empleado-días sembrados",
+      "queryLines": [
+        "SELECT t.dt, t.patron,\n",
+        "       CASE WHEN v.cohorte = 'prueba' THEN 'Prueba' ELSE 'Calibración' END AS cohorte,\n",
+        "       CONCAT(COALESCE(l.Tienda, 'Tienda sin nombre'), ' · ', t.LocationId) AS tienda,\n",
+        "       'Simulado' AS origen,\n",
+        "       count(*) AS tickets_sembrados,\n",
+        "       count_if(r.prioridad_dia <= 20 AND r.score >= 2) AS tickets_en_cola,\n",
+        "       max(CASE WHEN r.prioridad_dia <= 20 AND r.score >= 2 THEN 1 ELSE 0 END) AS encontrado_cola,\n",
+        "       max(CASE WHEN r.prioridad_por_monto <= 20 THEN 1 ELSE 0 END) AS encontrado_monto\n",
+        "FROM sim_tickets_sembrados t\n",
+        "LEFT JOIN sim_fraude_sembrado v ON v.EmployeeId = t.EmployeeId AND v.LocationId = t.LocationId\n",
+        "LEFT JOIN gold_revision_descuentos r ON r.dt = t.dt AND r.LocationId = t.LocationId AND r.CheckId = t.CheckId\n",
+        "LEFT JOIN silver_locations l ON l.LocationId = t.LocationId\n",
+        "GROUP BY t.dt, t.patron, t.EmployeeId, t.LocationId, l.Tienda, v.cohorte\n"
       ]
     }
   ],
@@ -1324,9 +1355,10 @@
             "name": "sim_titulo",
             "multilineTextboxSpec": {
               "lines": [
-                "## Datos simulados y abuso sembrado\n\n",
-                "Cada corrida agrega un día nuevo a partir de un día real del mismo día de la semana e inserta tickets con abuso conocido. ",
-                "Como sabemos cuáles son, medimos cuántos entran a la cola de 20 y cuántos entrarían si solo ordenáramos por monto."
+                "## Cobertura de la cola en días simulados\n\n",
+                "Un empleado-día cuenta cuando al menos uno de sus tickets sembrados entra al top 20. ",
+                "Elige **Calibración** o **Prueba** para leer cada ensayo por separado. ",
+                "Los filtros de canal y pago aplican al detalle por ticket."
               ]
             }
           },
@@ -1334,6 +1366,85 @@
             "x": 0,
             "y": 0,
             "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "sim_cohorte",
+            "queries": [
+              {
+                "name": "sim_cohorte_empleado_dias",
+                "query": {
+                  "datasetName": "empleado_dias",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "cohorte",
+                      "expression": "`cohorte`"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "sim_cohorte_sembrados",
+                "query": {
+                  "datasetName": "sembrados",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "cohorte",
+                      "expression": "`cohorte`"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "sim_cohorte_bitacora",
+                "query": {
+                  "datasetName": "bitacora",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "cohorte",
+                      "expression": "`cohorte`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "cohorte",
+                    "queryName": "sim_cohorte_empleado_dias",
+                    "displayName": "Cohorte de simulación"
+                  },
+                  {
+                    "fieldName": "cohorte",
+                    "queryName": "sim_cohorte_sembrados",
+                    "displayName": "Cohorte de simulación"
+                  },
+                  {
+                    "fieldName": "cohorte",
+                    "queryName": "sim_cohorte_bitacora",
+                    "displayName": "Cohorte de simulación"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Cohorte de simulación"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 4,
             "height": 2
           }
         },
@@ -1372,7 +1483,7 @@
           },
           "position": {
             "x": 0,
-            "y": 2,
+            "y": 4,
             "width": 3,
             "height": 3
           }
@@ -1384,11 +1495,11 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "sembrados",
+                  "datasetName": "empleado_dias",
                   "fields": [
                     {
-                      "name": "sim_tickets",
-                      "expression": "COUNT(`ticket`)"
+                      "name": "sim_empleado_dias",
+                      "expression": "COUNT(`dt`)"
                     }
                   ],
                   "disaggregated": false
@@ -1400,19 +1511,19 @@
               "widgetType": "counter",
               "encodings": {
                 "value": {
-                  "fieldName": "sim_tickets",
-                  "displayName": "Tickets sembrados"
+                  "fieldName": "sim_empleado_dias",
+                  "displayName": "Empleado-días sembrados"
                 }
               },
               "frame": {
                 "showTitle": true,
-                "title": "Tickets sembrados"
+                "title": "Empleado-días sembrados"
               }
             }
           },
           "position": {
             "x": 3,
-            "y": 2,
+            "y": 4,
             "width": 3,
             "height": 3
           }
@@ -1424,11 +1535,11 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "sembrados",
+                  "datasetName": "empleado_dias",
                   "fields": [
                     {
-                      "name": "sim_en_cola",
-                      "expression": "try_divide(SUM(`en_cola`), COUNT(`ticket`))"
+                      "name": "sim_pct_cola",
+                      "expression": "AVG(`encontrado_cola`)"
                     }
                   ],
                   "disaggregated": false
@@ -1440,8 +1551,8 @@
               "widgetType": "counter",
               "encodings": {
                 "value": {
-                  "fieldName": "sim_en_cola",
-                  "displayName": "Entran a la cola",
+                  "fieldName": "sim_pct_cola",
+                  "displayName": "Encontrados por la cola",
                   "format": {
                     "type": "number-percent",
                     "decimalPlaces": {
@@ -1453,13 +1564,14 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Entran a la cola"
+                "title": "Encontrados por la cola",
+                "description": "Un empleado-día cuenta si al menos uno de sus tickets sembrados queda entre los 20 del día."
               }
             }
           },
           "position": {
             "x": 6,
-            "y": 2,
+            "y": 4,
             "width": 3,
             "height": 3
           }
@@ -1471,11 +1583,11 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "sembrados",
+                  "datasetName": "empleado_dias",
                   "fields": [
                     {
-                      "name": "sim_en_monto",
-                      "expression": "try_divide(SUM(`en_top_monto`), COUNT(`ticket`))"
+                      "name": "sim_pct_monto",
+                      "expression": "AVG(`encontrado_monto`)"
                     }
                   ],
                   "disaggregated": false
@@ -1487,8 +1599,8 @@
               "widgetType": "counter",
               "encodings": {
                 "value": {
-                  "fieldName": "sim_en_monto",
-                  "displayName": "Entrarían por monto",
+                  "fieldName": "sim_pct_monto",
+                  "displayName": "Encontrados ordenando por monto",
                   "format": {
                     "type": "number-percent",
                     "decimalPlaces": {
@@ -1500,13 +1612,14 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Entrarían por monto"
+                "title": "Encontrados ordenando por monto",
+                "description": "Un empleado-día cuenta si al menos uno de sus tickets sembrados queda entre los 20 del día."
               }
             }
           },
           "position": {
             "x": 9,
-            "y": 2,
+            "y": 4,
             "width": 3,
             "height": 3
           }
@@ -1518,7 +1631,7 @@
               {
                 "name": "main_query",
                 "query": {
-                  "datasetName": "sembrados",
+                  "datasetName": "empleado_dias",
                   "fields": [
                     {
                       "name": "patron",
@@ -1526,7 +1639,7 @@
                     },
                     {
                       "name": "sim_patron",
-                      "expression": "try_divide(SUM(`en_cola`), COUNT(`ticket`))"
+                      "expression": "AVG(`encontrado_cola`)"
                     }
                   ],
                   "disaggregated": false
@@ -1564,13 +1677,13 @@
               },
               "frame": {
                 "showTitle": true,
-                "title": "Detección por patrón"
+                "title": "Empleado-días encontrados por patrón"
               }
             }
           },
           "position": {
             "x": 0,
-            "y": 5,
+            "y": 7,
             "width": 6,
             "height": 6
           }
@@ -1635,7 +1748,7 @@
           },
           "position": {
             "x": 6,
-            "y": 5,
+            "y": 7,
             "width": 6,
             "height": 6
           }
@@ -1653,6 +1766,10 @@
                     {
                       "name": "dt",
                       "expression": "`dt`"
+                    },
+                    {
+                      "name": "cohorte",
+                      "expression": "`cohorte`"
                     },
                     {
                       "name": "patron",
@@ -1685,6 +1802,10 @@
                     {
                       "name": "motivos",
                       "expression": "`motivos`"
+                    },
+                    {
+                      "name": "situacion",
+                      "expression": "`situacion`"
                     }
                   ]
                 }
@@ -1698,6 +1819,10 @@
                   {
                     "fieldName": "dt",
                     "displayName": "Fecha"
+                  },
+                  {
+                    "fieldName": "cohorte",
+                    "displayName": "Cohorte"
                   },
                   {
                     "fieldName": "patron",
@@ -1717,7 +1842,11 @@
                   },
                   {
                     "fieldName": "score",
-                    "displayName": "Puntos / 7"
+                    "displayName": "Puntos"
+                  },
+                  {
+                    "fieldName": "situacion",
+                    "displayName": "Situación en la cola"
                   },
                   {
                     "fieldName": "prioridad_dia",
@@ -1741,7 +1870,7 @@
           },
           "position": {
             "x": 0,
-            "y": 11,
+            "y": 13,
             "width": 12,
             "height": 9
           }
@@ -1808,6 +1937,19 @@
                     }
                   ]
                 }
+              },
+              {
+                "name": "g_fecha_empleado_dias",
+                "query": {
+                  "datasetName": "empleado_dias",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "dt",
+                      "expression": "`dt`"
+                    }
+                  ]
+                }
               }
             ],
             "spec": {
@@ -1833,6 +1975,11 @@
                   {
                     "fieldName": "dt",
                     "queryName": "g_fecha_bitacora",
+                    "displayName": "Fechas de negocio"
+                  },
+                  {
+                    "fieldName": "dt",
+                    "queryName": "g_fecha_empleado_dias",
                     "displayName": "Fechas de negocio"
                   }
                 ]
@@ -1892,6 +2039,19 @@
                     }
                   ]
                 }
+              },
+              {
+                "name": "g_tienda_empleado_dias",
+                "query": {
+                  "datasetName": "empleado_dias",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "tienda",
+                      "expression": "`tienda`"
+                    }
+                  ]
+                }
               }
             ],
             "spec": {
@@ -1912,6 +2072,11 @@
                   {
                     "fieldName": "tienda",
                     "queryName": "g_tienda_sembrados",
+                    "displayName": "Tienda"
+                  },
+                  {
+                    "fieldName": "tienda",
+                    "queryName": "g_tienda_empleado_dias",
                     "displayName": "Tienda"
                   }
                 ]
@@ -2142,6 +2307,19 @@
                     }
                   ]
                 }
+              },
+              {
+                "name": "g_origen_empleado_dias",
+                "query": {
+                  "datasetName": "empleado_dias",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "origen",
+                      "expression": "`origen`"
+                    }
+                  ]
+                }
               }
             ],
             "spec": {
@@ -2167,6 +2345,11 @@
                   {
                     "fieldName": "origen",
                     "queryName": "g_origen_bitacora",
+                    "displayName": "Datos (real / simulado)"
+                  },
+                  {
+                    "fieldName": "origen",
+                    "queryName": "g_origen_empleado_dias",
                     "displayName": "Datos (real / simulado)"
                   }
                 ]

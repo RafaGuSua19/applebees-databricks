@@ -4,7 +4,7 @@
 
 El dataset termina el 20 de agosto. Para mostrar el pipeline como funcionaría en operación diaria, **generamos días nuevos** (21 ago, 22 ago…) y los dejamos caer en un volumen. El job de simulación dispara la orquestación diaria: Auto Loader detecta el archivo, la compuerta revisa calidad, el modelo puntúa los tickets y el dashboard muestra la cola del día nuevo.
 
-Además, en cada día simulado **sembramos tickets con abuso conocido**. Como sabemos cuáles son, podemos medir algo que con el histórico no se puede: **¿cuántos de esos tickets entran a la cola de 20?**
+Además, en cada día simulado **sembramos tickets con abuso conocido**. Medimos cuántos empleado-días sembrados detecta la cola de 20. Un empleado-día cuenta como detectado cuando al menos uno de sus tickets sembrados entra a la cola.
 
 ## Cómo funciona por dentro
 
@@ -16,7 +16,7 @@ Simulador ──► Volumen demo ──► Auto Loader ──► Silver ──�
 1. **Simulador** (`src/simulacion/simulador_tickets.py`). Toma un día real con el mismo día de la semana (un viernes simulado parte de un viernes real), conserva entre 85 % y 100 % de los tickets de cada tienda y recorre las fechas al día nuevo. El archivo tiene exactamente el formato de la fuente.
 2. **Abuso sembrado.** Se eligen 8 empleados (uno por tienda) y, en el día simulado, unos 15 de sus tickets reciben un descuento con uno de 4 patrones:
 
-   | Patrón | Qué hace | Qué esperamos del modelo |
+   | Patrón | Qué hace | Hipótesis del ensayo inicial con la v1 |
    |---|---|---|
    | `efectivo_manager` | MANAGER de 50–90 %, cobrado en efectivo | Probablemente **0 puntos** (ver nota) |
    | `walkout_sin_gerente` | WALKOUT de 60–90 % sin gerente, en efectivo | 1 punto (sin gerente): no alcanza el mínimo de 2 |
@@ -80,9 +80,48 @@ Las dos corridas completas tardaron más de cuatro minutos. Consulta los [result
 2. **Mostrar el job corriendo** (vista de tareas): *"Acaba de llegar el archivo del siguiente día. Auto Loader procesa el archivo nuevo y la compuerta revisa calidad antes de publicar la cola."*
 3. **Dashboard → Descuentos:** filtrar *Datos = Simulado*. *"Los días simulados tienen un volumen y una tasa parecidos a los reales; la tasa sube un poco por los descuentos sembrados."* En el ensayo: 3.64 % y 3.39 % los dos primeros días simulados, contra 3.0–4.5 % de los últimos días reales.
 4. **Dashboard → Cola de revisión:** elegir el último día. Abrir un ticket con motivos *"Autoaprobación registrada + Abierto al menos 4 h"*. *"Este es uno de los tickets que sembramos. El modelo lo puso en la cola y explica por qué."* Señalar el contador **Fuera del top 20 por monto**: *"Estos casos no los vería alguien que solo ordena por monto."*
-5. **Dashboard → Simulación:** *"En siete días, la cola encontró 45 de 56 empleado-días sembrados (80 %); ordenar por monto encontró 24. El patrón sutil casi no entra, y es lo esperado: un descuento de 20 % con tarjeta se parece a una promoción."*
+5. **Dashboard → Simulación:** elegir **Cohorte de simulación → Calibración**. *"En los siete días de calibración, la cola encontró 45 de 56 empleado-días sembrados (80 %); ordenar por monto encontró 24. El patrón sutil casi no entra: un descuento de 20 % con tarjeta se parece a una promoción."* Cambiar a **Prueba** para mostrar el ensayo independiente.
 
 Si la corrida en vivo no termina a tiempo, se muestra el día simulado anterior; ya está procesado desde el ensayo.
+
+## Prueba con empleados nuevos (cohorte `prueba`)
+
+Los resultados de la v2 usan los mismos 8 empleados con los que se calibraron los umbrales. Para medirla con casos que no vio, el simulador tiene una segunda cohorte: 8 empleados nuevos, en tiendas que no se usaron, con 4 patrones distintos. Al correr con `cohorte = prueba`, los empleados de la cohorte base dejan de sembrarse.
+
+| Patrón | Qué hace | Intentos por empleado y día | Qué pone a prueba |
+|---|---|---:|---|
+| `goteo_manager` | MANAGER de 35–60 % en efectivo, autorizado por otro gerente | ~2 | Conducta del empleado cerca del umbral semanal (8–12 en 7 días) |
+| `walkout_tarjeta` | WALKOUT de 50–80 % sin gerente, pagado con tarjeta | ~3 | Tasa con tarjeta y WALKOUT poco frecuente |
+| `error_servidor` | SERVERERR de 40–70 % en efectivo | ~10 | Abuso con un código que no es MANAGER/WALKOUT: la señal del empleado no aplica |
+| `emp50_clientes` | Descuento de empleado al 50 % en tickets de clientes con tarjeta | ~8 | Tasa inusual con tarjeta |
+
+El número de tickets sembrados puede quedar por debajo de los intentos. El simulador necesita un ticket apto, como uno con pago con tarjeta para los patrones que lo requieren.
+
+Pasos:
+
+1. Desplegar la versión del simulador con cohortes (el job ya trae el parámetro `cohorte: base`).
+2. Correr el job con `cohorte = prueba`, 5 a 7 veces (un día por corrida). Desde la interfaz: *Run now with different parameters* → `cohorte = prueba`. Con el CLI, sustituir el ID de ejemplo por el del job:
+   ```bash
+   databricks jobs run-now --json '{"job_id":123456,"job_parameters":{"cohorte":"prueba"}}'
+   ```
+   La primera corrida elige a los empleados nuevos y los guarda en `sim_fraude_sembrado` con `cohorte = prueba`; las siguientes reutilizan los mismos.
+3. Correr `validation/sql/fase3_simulacion.sql`: ahora separa los resultados por cohorte.
+
+### Resultados de las cinco corridas
+
+Del 28 de agosto al 1 de septiembre de 2026, el simulador generó 85,537 tickets y sembró 151 casos. Usó ocho empleados de ocho tiendas diferentes a los de calibración. Se evaluó la v2 con los mismos umbrales. Hubo 37 empleado-días con al menos un ticket sembrado de 40 posibles.
+
+| Patrón | Tickets sembrados | Empleado-días sembrados | En la cola v2 | En la cola v1 | En el top 20 por monto |
+|---|---:|---:|---:|---:|---:|
+| `goteo_manager` | 15 | 7 | 0 | 0 | 0 |
+| `walkout_tarjeta` | 16 | 10 | 7 | 7 | 2 |
+| `error_servidor` | 80 | 10 | 0 | 0 | 2 |
+| `emp50_clientes` | 40 | 10 | 1 | 1 | 0 |
+| **Total** | **151** | **37** | **8 (21.6 %)** | **8 (21.6 %)** | **4 (10.8 %)** |
+
+La v2 encontró tantos empleado-días como la v1 en esta cohorte y el doble que el ranking por monto. Siete de los ocho aciertos fueron `WALKOUT` con tarjeta. La v2 puntuó los 151 tickets sembrados. En el top 20 diario entraron 11 tickets con la v2, 12 con la v1 y 4 por monto. En calibración, la v2 encontró 45 de 56 empleado-días (80.4 %).
+
+Las cinco corridas completaron la generación, ingesta, compuerta de calidad y publicación de la cola. La mediana fue de 4 min 19 s y el rango de 4 min 12 s a 5 min 17 s. La demo terminó con 47 archivos y 834,097 tickets admitidos, sin duplicados, cuarentena ni advertencias. Se verificaron las 49 consultas de los widgets y los totales del dashboard coincidieron con la consulta de validación por cohorte.
 
 ## Si preguntan
 
