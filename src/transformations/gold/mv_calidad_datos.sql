@@ -4,7 +4,8 @@ COMMENT 'Completitud entre capas, unicidad, validez, integridad referencial y ex
 AS WITH k AS (
   SELECT LocationId, dt, CheckId, COUNT(*) AS n FROM silver_checks GROUP BY ALL
 ), diario AS (
-  SELECT dt, AVG(CASE WHEN abs(paid - (sold - disc_check + tax + tip)) <= 0.05 THEN 1.0 ELSE 0.0 END) AS pct
+  SELECT dt, AVG(CASE WHEN tip IS NULL THEN NULL
+                      WHEN abs(paid - (sold - disc_check + tax + tip)) <= 0.05 THEN 1.0 ELSE 0.0 END) AS pct
   FROM silver_checks GROUP BY dt
 ), entrada AS (
   SELECT COUNT(*) AS tickets,
@@ -32,10 +33,14 @@ SELECT
   (SELECT COUNT(DISTINCT LocationId) FROM silver_checks) AS tiendas,
   (SELECT COUNT(DISTINCT _source_file) FROM bronze_checks) AS archivos,
   (SELECT COUNT(*) FROM k WHERE n > 1) AS llaves_duplicadas,
-  (SELECT AVG(CASE WHEN abs(paid - (sold - disc_check + tax + tip)) <= 0.05 THEN 1.0 ELSE 0.0 END)
+  (SELECT AVG(CASE WHEN tip IS NULL THEN NULL
+                   WHEN abs(paid - (sold - disc_check + tax + tip)) <= 0.05 THEN 1.0 ELSE 0.0 END)
      FROM silver_checks) AS pct_tickets_conciliados,
   (SELECT MIN(pct) FROM diario) AS min_pct_conciliado_diario,
   (SELECT COUNT_IF(_rescued_data IS NOT NULL) FROM bronze_checks) AS registros_rescatados,
+  (SELECT COUNT_IF(size(_dq_warnings) > 0) FROM silver_checks) AS tickets_admitidos_con_advertencia,
+  (SELECT COUNT_IF(tip IS NULL) FROM silver_checks) AS tickets_propina_desconocida,
+  (SELECT COUNT_IF(ItemId IS NULL) FROM silver_items) AS lineas_sin_item_id,
   abs((SELECT tickets FROM entrada) - (SELECT COUNT(*) FROM silver_checks)) AS diferencia_tickets,
   abs((SELECT items FROM entrada) - (SELECT COUNT(*) FROM silver_items)) AS diferencia_items,
   abs((SELECT descuentos FROM entrada) - (SELECT COUNT(*) FROM silver_discounts)) AS diferencia_descuentos,

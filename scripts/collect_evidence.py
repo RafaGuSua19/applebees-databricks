@@ -14,7 +14,7 @@ def main():
     parser.add_argument("--warehouse-id", required=True)
     parser.add_argument("--catalog", default="workspace")
     parser.add_argument("--schema", required=True)
-    parser.add_argument("--only", help="Nombre de un archivo SQL para ejecutar solo esa comprobación")
+    parser.add_argument("--only", help="Archivo SQL individual; las comprobaciones de Fase 3 son optativas")
     parser.add_argument("--output", type=Path, default=ROOT / ".local/validation/evidence.json")
     args = parser.parse_args()
 
@@ -28,6 +28,8 @@ def main():
     args.output.parent.mkdir(parents=True, exist_ok=True)
     for path in sorted((ROOT / "validation/sql").glob("*.sql")):
         if args.only and path.name != args.only:
+            continue
+        if not args.only and path.stem.startswith("fase3_"):
             continue
         # Los archivos versionados no contienen punto y coma en literales.
         source = "\n".join(line for line in path.read_text().splitlines()

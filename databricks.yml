@@ -13,6 +13,12 @@ variables:
     default: applebees_${bundle.target}_${workspace.current_user.short_name}
   source_path:
     default: /Volumes/workspace/default/applebees
+  schedule_pause_status:
+    description: Estado de la programación diaria; probar en QA antes de activar.
+    default: PAUSED
+  dashboard_warehouse_id:
+    description: SQL warehouse para el dashboard del target phase3.
+    default: ""
   failure_emails:
     description: Destinatarios autorizados de fallos; configurar para operación compartida.
     type: complex
@@ -30,3 +36,20 @@ targets:
     default: true
   qa:
     mode: development
+  phase3:
+    mode: development
+    resources:
+      pipelines:
+        applebees_pipeline:
+          name: applebees_phase3_descuentos_pipeline
+      jobs:
+        daily_orchestration_job:
+          name: applebees_phase3_daily_orchestration
+      dashboards:
+        revision_descuentos:
+          display_name: Applebee’s | Revisión de descuentos
+          file_path: resources/dashboards/revision_descuentos.lvdash.json
+          warehouse_id: ${var.dashboard_warehouse_id}
+          dataset_catalog: ${var.catalog}
+          dataset_schema: ${var.schema}
+          embed_credentials: false

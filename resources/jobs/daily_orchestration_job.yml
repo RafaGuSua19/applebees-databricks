@@ -1,4 +1,4 @@
-# Job diario: actualiza el pipeline, valida calidad y genera alertas de riesgo
+# Job diario: actualiza el pipeline, valida calidad y publica la priorización de revisión
 resources:
   jobs:
     daily_orchestration_job:
@@ -7,7 +7,7 @@ resources:
       schedule:
         quartz_cron_expression: "0 0 6 * * ?"   # todos los días 6:00 AM
         timezone_id: America/Chicago
-        pause_status: PAUSED                     # se activa al pasar a producción
+        pause_status: ${var.schedule_pause_status}
       email_notifications:
         on_failure: ${var.failure_emails}
       parameters:
@@ -41,6 +41,18 @@ resources:
             - task_key: data_quality_gate
           notebook_task:
             notebook_path: ../../src/jobs/alertas_riesgo.py
+            base_parameters:
+              catalog: '{{job.parameters.catalog}}'
+              schema: '{{job.parameters.schema}}'
+          max_retries: 1
+          min_retry_interval_millis: 60000
+
+        - task_key: publish_review_queue
+          description: Publica el score contextual y el ranking diario para el dashboard
+          depends_on:
+            - task_key: data_quality_gate
+          notebook_task:
+            notebook_path: ../../src/jobs/publicar_revision.py
             base_parameters:
               catalog: '{{job.parameters.catalog}}'
               schema: '{{job.parameters.schema}}'

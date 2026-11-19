@@ -4,20 +4,22 @@
 
 `bronze_checks` conserva `_raw_record` (objeto JSON), `_source_file`, `_record_index`, `_ingested_at`, fecha y marca. Un archivo vacío o inválido produce un diagnóstico recuperable. La interpretación por ticket detecta campos adicionales incluso en arrays anidados, tipos incompatibles, llaves ausentes, importes esenciales nulos y discordancia entre `BusinessDate` y la fecha del path. `_rescued_data` guarda el motivo, no un fragmento truncado que sustituya al original.
 
-La vista `valid_checks` es la única entrada de los tickets y de todos sus detalles en silver. Los registros con diagnóstico permanecen en bronze; no generan detalles huérfanos. La compuerta bloquea las alertas si existe cualquier registro rescatado. El JSON original permite inspeccionar campos nuevos y corregir el contrato sin perderlos silenciosamente.
+La vista `valid_checks` es la entrada común de los tickets y sus detalles a Silver. `_rescued_data` identifica errores críticos que conservan la fila en Bronze y bloquean la publicación de alertas. `_dq_warnings` enumera incidentes recuperables. Campos nuevos, ítems sin ID con precios válidos y propinas ausentes siguen a Silver. Las columnas tipadas y el JSON original conservan la evidencia.
 
-Los arrays de actividad nulos o vacíos representan ausencia de movimientos, como en la fuente original. Un elemento presente con importe esencial nulo es inválido. La validación no implica que todo string opcional tenga significado de negocio: horarios, empleados desconocidos y signos se controlan además en silver/gold.
+Los arrays de actividad nulos o vacíos representan ausencia de movimientos, como en la fuente original. Un elemento presente con importe esencial nulo es inválido. Una propina ausente se conserva como dato desconocido. La validación no implica que todo string opcional tenga significado de negocio: horarios, empleados desconocidos y signos se controlan además en silver/gold.
 
 ## Controles críticos
 
 | Dimensión | Implementación | Acción |
 |---|---|---|
-| Estructura/tipos | Parser con esquema explícito, columna de corrupción y detección recursiva de campos extra | Conservar en bronze, excluir el ticket completo de silver, bloquear alertas |
+| Estructura/tipos | Parser con esquema explícito y columna de corrupción | Cuarentena para registros ilegibles o tipos incompatibles; conserva JSON y motivo |
+| Campos nuevos | Detección recursiva en objetos y arrays | Admitir valores tipados y mostrar advertencia |
+| ID de artículo o propina ausente | Columna nula y diagnóstico explícito | Conservar venta, descuento y otros importes válidos; medir cobertura de conciliación |
 | Completitud | Conteos de tickets, items, descuentos, pagos y voids válidos esperados desde bronze contra silver | Bloquear si difieren |
 | Unicidad | Llave `LocationId + dt + CheckId` | Bloquear duplicados; no elegir arbitrariamente una copia |
 | Referencias | Ticket debe enlazar tienda y canal; score debe enlazar un empleado positivo | Bloquear referencias perdidas |
 | Catálogos | IDs obligatorios y ausencia de atributos contradictorios por ID | Bloquear contradicciones; duplicados idénticos se consolidan |
-| Consistencia monetaria | `paid = sold - disc_check + tax + tip`, tolerancia $0.05 | Conciliación ≥95% global y en cada día |
+| Consistencia monetaria | `paid = sold - disc_check + tax + tip`, tolerancia $0.05 | Conciliación ≥95% global y en cada día con tickets evaluables; mostrar cobertura por separado |
 | Porcentajes | `pct_desc` gold entre 0 y 1, o nulo cuando venta bruta es cero; igualdad con el cociente de sus totales a nueve decimales | Bloquear resultados fuera del contrato |
 | Métricas | Exactamente una fila de calidad, contadores enteros no negativos, ratios finitos | Bloquear nulos, ausencias, infinitos y cardinalidad incorrecta |
 

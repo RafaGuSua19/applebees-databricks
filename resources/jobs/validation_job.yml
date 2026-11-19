@@ -3,7 +3,7 @@ targets:
   qa:
     resources:
       jobs:
-        validation_job:
+        validation_job: &validation_job
           name: applebees_validation
           max_concurrent_runs: 1
           tasks:
@@ -41,3 +41,10 @@ targets:
                   catalog: ${var.catalog}
                   schema: ${var.schema}
               max_retries: 0
+
+  phase3:
+    resources:
+      jobs:
+        validation_job:
+          <<: *validation_job
+          name: applebees_phase3_validation
