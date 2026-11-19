@@ -53,8 +53,8 @@ La comparación del histórico confirmó 344 tickets en ambas listas y 85 ticket
 
 ## Límites
 
-- El patrón "sutil" (pocos puntos de descuento con tarjeta) sigue sin detectarse. Es razonable: se parece a una promoción.
-- Los umbrales (8 y 12 en 7 días) se calibraron con los últimos 21 días reales; se deben revisar con Operaciones.
+- En los dos días iniciales, el patrón sutil de descuentos con tarjeta quedó fuera de la cola. La tabla de siete días muestra el resultado ampliado.
+- Los umbrales (8 y 12 en 7 días) se calibraron con los últimos 21 días reales. Sus valores quedan sujetos a revisión con Operaciones.
 - La señal necesita al menos un MANAGER/WALKOUT en el ticket; el abuso con otros códigos de descuento depende de las demás señales.
 
 ## Despliegue y pruebas
@@ -63,3 +63,39 @@ La comparación del histórico confirmó 344 tickets en ambas listas y 85 ticket
 - [Aceptación en Databricks](https://dbc-eb170ead-6845.cloud.databricks.com/jobs/836429566572761/runs/95271018841802?o=7474659154935244). Pasaron los escenarios de ventana y ranking. El test de tres tickets de la misma persona confirma que el tercero queda fuera de la cola y conserva su posición por importe.
 - Las 15 pruebas locales y las 72 consultas de widgets terminaron sin errores. El histórico real conservó 115 archivos y 2,142,846 tickets, con cero duplicados y cero registros en cuarentena.
 - El permiso `CAN_MANAGE_RUN` se configura en el recurso del job de simulación. El job sigue ejecutándose con la identidad de quien lo despliega. Los parámetros de ruta del notebook se validan contra el volumen oficial y el volumen y esquema dedicados a demo.
+
+## Ensayo ampliado a siete días
+
+Se completaron cinco corridas adicionales consecutivas. Los resultados comparan v1, v2 y el ranking por importe sobre los mismos datos y con hasta 20 lugares por fecha. Un empleado-día cuenta cuando su ticket sembrado aparece en la cola al menos una vez ese día.
+
+| Fecha adicional | Duración | Tickets generados | Tickets sembrados | Empleado-días en cola v2 |
+|---|---:|---:|---:|---:|
+| [2026-08-23](https://dbc-eb170ead-6845.cloud.databricks.com/jobs/313690563199164/runs/75371618975820?o=7474659154935244) | 280.4 s | 17,796 | 91 | 6 |
+| [2026-08-24](https://dbc-eb170ead-6845.cloud.databricks.com/jobs/313690563199164/runs/183650257997921?o=7474659154935244) | 253.4 s | 13,743 | 75 | 7 |
+| [2026-08-25](https://dbc-eb170ead-6845.cloud.databricks.com/jobs/313690563199164/runs/703521419923178?o=7474659154935244) | 253.4 s | 14,555 | 102 | 6 |
+| [2026-08-26](https://dbc-eb170ead-6845.cloud.databricks.com/jobs/313690563199164/runs/1061990146497370?o=7474659154935244) | 245.2 s | 16,149 | 105 | 8 |
+| [2026-08-27](https://dbc-eb170ead-6845.cloud.databricks.com/jobs/313690563199164/runs/280178836806995?o=7474659154935244) | 245.9 s | 17,574 | 109 | 6 |
+
+| Periodo | Empleado-días sembrados | Ranking por importe | Cola v1 | Cola v2 |
+|---|---:|---:|---:|---:|
+| Cinco días adicionales | 40 | 15 | 10 | 33 |
+| Siete días | 56 | 24 | 14 | 45 |
+
+Desglose de los siete días.
+
+| Patrón | Empleado-días sembrados | Ranking por importe | Cola v1 | Cola v2 | Tickets sembrados en cola v2 |
+|---|---:|---:|---:|---:|---:|
+| `autoaprobado_4h` | 14 | 5 | 14 | 14 | 27 |
+| `efectivo_manager` | 14 | 7 | 0 | 14 | 26 |
+| `sutil` | 14 | 0 | 0 | 3 | 4 |
+| `walkout_sin_gerente` | 14 | 12 | 0 | 14 | 28 |
+
+La cola v2 priorizó 85 de 686 tickets sembrados en siete días. La v1 priorizó 87 y la lista por importe 31. El volumen de tickets priorizados se repartió entre más empleado-días con la v2. Se volvieron a puntuar los dos días iniciales con v2 al republicar la cola.
+
+La demo alcanzó 42 archivos y 748,560 tickets admitidos, con cero duplicados, cero registros en cuarentena y fecha de corte del 27 de agosto de 2026. El tope por empleado se cumplió en todas las fechas publicadas.
+
+Los siete días reutilizan los mismos perfiles y patrones sembrados. La comparación sirve para medir cobertura de este ensayo. La proporción de casos accionables en operación se medirá con revisión humana.
+
+Para reproducir la comparación publicada con el importe, ejecutar [fase3_simulacion.sql](../validation/sql/fase3_simulacion.sql). La comparación con v1 usa la consulta de `src/jobs/modelo_revision.sql` del commit `ff248d1` como CTE en el mismo esquema demo. Ambas versiones se cruzan con las etiquetas por fecha, tienda y ticket. Para revisar los cinco días adicionales, filtrar las etiquetas del 23 al 27.
+
+[Dashboard de Simulación](https://dbc-eb170ead-6845.cloud.databricks.com/dashboardsv3/01f1e3d2467715c89940a6cd05daec17/published?w=7474659154935244). Para el pitch, abrir el 27 de agosto ya procesado.
